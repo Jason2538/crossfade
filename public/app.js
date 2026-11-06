@@ -4,6 +4,7 @@ import { finishSpotifyLogin, sendToCollector, startSpotifyLogin, takeSpotifyCall
 const REFRESH_MS = 60_000;
 const MAX_WEEKS_BACK = 7;
 const SNAPSHOT_REFRESH_MS = 5 * 60_000;
+const COUNT_UP_MS = 900;
 // 수집이 이보다 오래 멈췄다면 "지금 듣는 중"은 더 이상 지금이 아닙니다.
 const NOW_PLAYING_TTL_SECONDS = 30 * 60;
 const CODE_STORAGE_KEY = 'crossfade.inviteCode';
@@ -33,6 +34,7 @@ const state = {
   snapshot: null,
   snapshotCode: null,
   snapshotLoadedAt: 0,
+  view: null,
   invite: takeInviteCode(),
   gateError: null,
   connect: null,
@@ -68,6 +70,28 @@ function el(tag, attrs = {}, ...children) {
   }
   node.append(...children.flat().filter((child) => child !== null && child !== undefined && child !== false));
   return node;
+}
+
+function countUp(node) {
+  const target = Number(node.dataset.count);
+  const startedAt = performance.now();
+  const tick = (now) => {
+    const progress = Math.min(1, Math.max(0, (now - startedAt) / COUNT_UP_MS));
+    node.textContent = number(Math.round(target * (1 - (1 - progress) ** 3)));
+    if (progress < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// 화면은 1분마다 다시 그려집니다. 등장 효과는 다른 화면으로 넘어갈 때만 보여 줍니다.
+function paint(view, ...nodes) {
+  const entering = view !== state.view;
+  state.view = view;
+  app.classList.toggle('enter', entering);
+  app.replaceChildren(...nodes);
+  if (entering && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    app.querySelectorAll('[data-count]').forEach(countUp);
+  }
 }
 
 async function api(path, options = {}) {
@@ -281,6 +305,8 @@ async function readMember(id, week) {
 }
 
 const number = (value) => value.toLocaleString('ko-KR');
+
+const counted = (value, tag = 'b') => el(tag, { 'data-count': value }, number(value));
 
 function hoursLabel(minutes) {
   const hours = Math.floor(minutes / 60);
@@ -503,7 +529,7 @@ function rankingSection(data) {
                 { class: 'bar-track', 'aria-hidden': 'true' },
                 el('div', {
                   class: `bar-fill ${member.service}`,
-                  style: { width: `${(member.minutes / max) * 100}%` },
+                  style: { width: `${(member.minutes / max) * 100}%`, animationDelay: `${300 + index * 70}ms` },
                 }),
               ),
               el(
@@ -548,7 +574,7 @@ function tasteSection(data) {
       ? el(
           'div',
           { class: 'taste-grid' },
-          data.pairs.map((pair) => {
+          data.pairs.map((pair, index) => {
             const a = nameOf(pair.a);
             const b = nameOf(pair.b);
             return el(
@@ -565,7 +591,7 @@ function tasteSection(data) {
                 ),
                 el('div', { class: 'pair-score' }, String(pair.score), el('small', {}, '%')),
               ),
-              el('div', { class: 'meter', 'aria-hidden': 'true' }, el('i', { style: { width: `${pair.score}%` } })),
+              el('div', { class: 'meter', 'aria-hidden': 'true' }, el('i', { style: { width: `${pair.score}%`, animationDelay: `${400 + index * 70}ms` } })),
               pair.sharedArtists.length
                 ? el(
                     'div',
@@ -607,7 +633,8 @@ async function renderHome() {
     render();
   };
 
-  app.replaceChildren(
+  paint(
+    `home:${state.week}`,
     el(
       'main',
       { class: 'shell' },
@@ -620,7 +647,7 @@ async function renderHome() {
         el(
           'div',
           {},
-          el('div', { class: 'hero-number' }, number(group.minutes), el('small', {}, '분')),
+          el('div', { class: 'hero-number' }, counted(group.minutes, 'span'), el('small', {}, '분')),
           el(
             'p',
             { class: 'hero-caption' },
@@ -630,9 +657,9 @@ async function renderHome() {
         el(
           'div',
           { class: 'hero-facts' },
-          el('div', { class: 'fact' }, el('b', {}, number(group.plays)), el('span', {}, '총 재생')),
-          el('div', { class: 'fact' }, el('b', {}, number(group.uniqueTracks)), el('span', {}, '서로 다른 곡')),
-          el('div', { class: 'fact' }, el('b', {}, String(members.length)), el('span', {}, '친구')),
+          el('div', { class: 'fact' }, counted(group.plays), el('span', {}, '총 재생')),
+          el('div', { class: 'fact' }, counted(group.uniqueTracks), el('span', {}, '서로 다른 곡')),
+          el('div', { class: 'fact' }, counted(members.length), el('span', {}, '친구')),
         ),
       ),
       fader(members),
@@ -663,7 +690,7 @@ function dayChart(byDay) {
           'div',
           { class: 'day-col', 'data-tip': `${DAY_NAMES[index]}요일: ${number(minutes)}분` },
           index === peak && minutes > 0 ? el('em', {}, `${number(minutes)}분`) : null,
-          el('i', { style: { height: `${(minutes / max) * 82}%` } }),
+          el('i', { style: { height: `${(minutes / max) * 82}%`, animationDelay: `${300 + index * 45}ms` } }),
         ),
       ),
     ),
@@ -682,7 +709,11 @@ function hourStrip(byHour) {
       'div',
       { class: 'hour-strip' },
       byHour.map((minutes, hour) =>
-        el('i', { class: `heat-${level(minutes)}`, 'data-tip': `${hour}시대: ${number(minutes)}분` }),
+        el('i', {
+          class: `heat-${level(minutes)}`,
+          'data-tip': `${hour}시대: ${number(minutes)}분`,
+          style: { animationDelay: `${300 + hour * 15}ms` },
+        }),
       ),
     ),
     el(
@@ -729,7 +760,8 @@ async function renderMember(id) {
       el('div', { class: 'sub-line' }, `${number(item.minutes)}분`),
     );
 
-  app.replaceChildren(
+  paint(
+    `member:${id}:${state.week}`,
     el(
       'main',
       { class: 'shell' },
@@ -745,11 +777,11 @@ async function renderMember(id) {
         'div',
         { class: 'stat-row' },
         [
-          [number(data.minutes), '청취 시간(분)'],
-          [number(data.plays), '재생 횟수'],
-          [number(data.uniqueTracks), '서로 다른 곡'],
-          [number(data.uniqueArtists), '아티스트'],
-        ].map(([value, label]) => el('div', { class: 'card stat' }, el('b', {}, value), el('span', {}, label))),
+          [data.minutes, '청취 시간(분)'],
+          [data.plays, '재생 횟수'],
+          [data.uniqueTracks, '서로 다른 곡'],
+          [data.uniqueArtists, '아티스트'],
+        ].map(([value, label]) => el('div', { class: 'card stat' }, counted(value), el('span', {}, label))),
       ),
       el(
         'div',
@@ -829,7 +861,8 @@ async function renderMember(id) {
 function renderAdminLogin() {
   const error = el('p', { class: 'form-error', role: 'alert' });
   const input = el('input', { type: 'password', name: 'password', autocomplete: 'off', required: true });
-  app.replaceChildren(
+  paint(
+    'admin-login',
     el(
       'main',
       { class: 'gate' },
@@ -938,7 +971,8 @@ function adminGroupCard(group) {
 function renderAdmin() {
   if (!state.admin) return renderAdminLogin();
   const { summary } = state.admin;
-  app.replaceChildren(
+  paint(
+    'admin',
     el(
       'main',
       { class: 'shell' },
@@ -966,14 +1000,15 @@ function renderAdmin() {
 
 function renderWaiting() {
   const code = state.pendingCode;
-  app.replaceChildren(
+  paint(
+    'waiting',
     el(
       'main',
       { class: 'gate' },
       el(
         'div',
         { class: 'card gate-card' },
-        el('img', { src: 'favicon.svg', alt: '', width: '36', height: '36' }),
+        el('span', { class: 'eq large', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')),
         el('h1', {}, '새 그룹을 만들고 있어요'),
         el('p', {}, '다음 수집 때(15분쯤) 자동으로 열려요. 그동안 이 코드를 저장해 두세요.'),
         el('p', { class: 'group-code' }, code),
@@ -999,7 +1034,8 @@ function renderGate() {
   const error = el('p', { class: 'form-error', role: 'alert' }, state.gateError);
   state.gateError = null;
   const input = el('input', { type: 'password', name: 'code', autocomplete: 'off', required: true, autofocus: true });
-  app.replaceChildren(
+  paint(
+    'gate',
     el(
       'main',
       { class: 'gate' },
@@ -1179,7 +1215,8 @@ function setupTooltips() {
 }
 
 function showError(error) {
-  app.replaceChildren(
+  paint(
+    'error',
     el(
       'main',
       { class: 'shell' },

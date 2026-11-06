@@ -218,6 +218,7 @@ a {
   font-weight: 700;
   line-height: 1;
   letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
 }
 
 .hero-number small {
@@ -464,6 +465,22 @@ a {
   to {
     transform: scaleY(1);
   }
+}
+
+.eq.large {
+  gap: 4px;
+  height: 28px;
+}
+
+.eq.large i {
+  width: 5px;
+  border-radius: 3px 3px 0 0;
+}
+
+.loading {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1156,5 +1173,165 @@ dialog h2 {
 
   .fader-labels {
     font-size: 13px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn,
+  .playing,
+  .rank-row,
+  .back,
+  .week-nav button {
+    transition:
+      background-color 0.18s ease,
+      color 0.18s ease,
+      opacity 0.18s ease,
+      transform 0.18s ease;
+  }
+
+  .btn:active:not(:disabled),
+  .week-nav button:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+
+  @media (hover: hover) {
+    .playing:hover {
+      transform: translateY(-2px);
+    }
+  }
+
+  .playing.live .cover {
+    animation: live-ring 2.4s ease-out infinite;
+  }
+
+  .form-error:not(:empty) {
+    animation: shake 0.32s ease;
+  }
+
+  dialog[open] {
+    animation: pop 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  dialog[open]::backdrop {
+    animation: fade 0.24s ease;
+  }
+
+  .loading .eq {
+    animation: fade 0.3s ease 0.2s backwards;
+  }
+
+  .enter .shell > * {
+    animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+
+  .enter .shell > :nth-child(2) {
+    animation-delay: 0.05s;
+  }
+
+  .enter .shell > :nth-child(3) {
+    animation-delay: 0.1s;
+  }
+
+  .enter .shell > :nth-child(4) {
+    animation-delay: 0.15s;
+  }
+
+  .enter .shell > :nth-child(5) {
+    animation-delay: 0.2s;
+  }
+
+  .enter .shell > :nth-child(n + 6) {
+    animation-delay: 0.25s;
+  }
+
+  .enter .gate-card {
+    animation: pop 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+
+  /* 페이더가 가운데에서 출발해 이번 주 비중까지 움직입니다. */
+  .enter .fader-rail i {
+    animation: fader-rail 1.1s cubic-bezier(0.2, 0.8, 0.2, 1) 0.2s backwards;
+  }
+
+  .enter .fader-knob {
+    animation: fader-knob 1.1s cubic-bezier(0.2, 0.8, 0.2, 1) 0.2s backwards;
+  }
+
+  .enter .bar-fill,
+  .enter .meter i {
+    transform-origin: left;
+    animation: grow-x 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+
+  .enter .day-col i {
+    transform-origin: bottom;
+    animation: grow-y 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+
+  .enter .hour-strip i {
+    animation: fade 0.4s ease backwards;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes shake {
+  25% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes live-ring {
+  from {
+    box-shadow: 0 0 0 0 var(--up);
+  }
+  70%,
+  to {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+@keyframes fader-rail {
+  from {
+    width: 50%;
+  }
+}
+
+@keyframes fader-knob {
+  from {
+    left: 50%;
+  }
+}
+
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
   }
 }
