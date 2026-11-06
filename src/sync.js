@@ -116,7 +116,7 @@ export function startSyncLoop(db, client, options) {
 
 function describeSpotifyError(error) {
   if (error.status === 400 || error.status === 401) return 'Spotify 로그인이 만료되었습니다. 다시 로그인해 주세요.';
-  if (error.status === 403) return '이 Spotify 계정은 앱 사용자로 등록되어 있지 않습니다.';
+  if (error.status === 403) return `Spotify가 요청을 거절했습니다: ${error.message}`;
   if (error.status === 429) return 'Spotify 요청 한도를 넘어 잠시 뒤 다시 시도합니다.';
   return error.message || '알 수 없는 오류';
 }
