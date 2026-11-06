@@ -160,6 +160,17 @@ a {
   opacity: 0.5;
 }
 
+.btn.icon {
+  width: 40px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.refresh-icon {
+  display: inline-block;
+}
+
 .notice {
   margin-bottom: 20px;
   padding: 10px 14px;
@@ -1208,6 +1219,10 @@ dialog h2 {
     animation: shake 0.32s ease;
   }
 
+  .btn.busy .refresh-icon {
+    animation: spin 0.7s linear infinite;
+  }
+
   dialog[open] {
     animation: pop 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
@@ -1270,6 +1285,12 @@ dialog h2 {
 
   .enter .hour-strip i {
     animation: fade 0.4s ease backwards;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

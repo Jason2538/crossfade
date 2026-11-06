@@ -5,6 +5,7 @@ const REFRESH_MS = 60_000;
 const MAX_WEEKS_BACK = 7;
 const SNAPSHOT_REFRESH_MS = 5 * 60_000;
 const COUNT_UP_MS = 900;
+const REFRESH_SPIN_MS = 500;
 // 수집이 이보다 오래 멈췄다면 "지금 듣는 중"은 더 이상 지금이 아닙니다.
 const NOW_PLAYING_TTL_SECONDS = 30 * 60;
 const CODE_STORAGE_KEY = 'crossfade.inviteCode';
@@ -274,17 +275,40 @@ async function shareInviteLink(event, code = state.snapshotCode) {
   }
 }
 
-async function refreshSnapshot() {
-  if (!state.snapshot || Date.now() - state.snapshotLoadedAt < SNAPSHOT_REFRESH_MS) return;
+async function reloadSnapshot() {
   const sealed = await fetchSealed(state.snapshotCode);
-  if (!sealed || sealed === 'missing') return;
+  if (!sealed || sealed === 'missing') return false;
   try {
     await unlock(sealed, state.snapshotCode);
+    return true;
   } catch {
     // 초대 코드가 바뀐 경우입니다.
     rememberCode(null);
     state.session.authed = false;
+    return false;
   }
+}
+
+async function refreshSnapshot() {
+  if (!state.snapshot || Date.now() - state.snapshotLoadedAt < SNAPSHOT_REFRESH_MS) return;
+  await reloadSnapshot();
+}
+
+async function refreshNow(event) {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.classList.add('busy');
+  if (state.snapshot) {
+    const before = state.snapshot.generatedAt;
+    const [loaded] = await Promise.all([
+      reloadSnapshot(),
+      new Promise((resolve) => setTimeout(resolve, REFRESH_SPIN_MS)),
+    ]);
+    if (!loaded) state.flash = '기록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
+    else if (state.snapshot.generatedAt > before) state.flash = '새 기록을 불러왔어요.';
+    else state.flash = `아직 새 기록이 없어요. 마지막 수집은 ${timeAgo(before)}이에요.`;
+  }
+  await render();
 }
 
 function hideStaleNowPlaying(data) {
@@ -349,6 +373,11 @@ function header() {
     el(
       'div',
       { class: 'topbar-actions' },
+      el(
+        'button',
+        { class: 'btn icon', type: 'button', title: '새로고침', 'aria-label': '새로고침', onclick: refreshNow },
+        el('span', { class: 'refresh-icon', 'aria-hidden': 'true' }, '↻'),
+      ),
       state.session.static ? el('button', { class: 'btn', type: 'button', onclick: shareInviteLink }, '초대 링크') : null,
       el('button', { class: 'btn primary', type: 'button', onclick: openAddDialog }, '친구 추가'),
     ),
