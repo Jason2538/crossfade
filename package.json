@@ -1,0 +1,16 @@
+{
+  "name": "crossfade",
+  "version": "0.1.0",
+  "description": "스포티파이와 애플뮤직을 쓰는 친구들의 주간 청취 통계를 한곳에서 보는 웹사이트",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
+    "collect": "node --disable-warning=ExperimentalWarning src/collect.js",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
+  }
+}

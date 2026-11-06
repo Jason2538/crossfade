@@ -1,0 +1,81 @@
+name: collect
+
+on:
+  schedule:
+    # 매시 정각은 GitHub가 붐벼서 지연이 잦습니다.
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 그룹 변경
+        type: choice
+        default: none
+        options: [none, add, remove]
+      name:
+        description: 이름 (추가할 때)
+        type: string
+      lastfm_user:
+        description: Last.fm 사용자 이름
+        type: string
+      service:
+        description: 쓰는 서비스 (추가할 때)
+        type: choice
+        default: apple
+        options: [apple, spotify]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: collect
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      MEMBER_ACTION: ${{ inputs.action }}
+      MEMBER_NAME: ${{ inputs.name }}
+      MEMBER_LASTFM: ${{ inputs.lastfm_user }}
+      MEMBER_SERVICE: ${{ inputs.service }}
+    steps:
+      - name: Hide member details from logs
+        run: |
+          [ -z "$MEMBER_NAME" ] || echo "::add-mask::$MEMBER_NAME"
+          [ -z "$MEMBER_LASTFM" ] || echo "::add-mask::$MEMBER_LASTFM"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Restore database
+        run: |
+          if git fetch --depth=1 origin data; then
+            git show FETCH_HEAD:crossfade.db.enc > crossfade.db.enc
+          fi
+      - name: Collect and build site
+        run: npm run collect
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          INVITE_CODE: ${{ secrets.INVITE_CODE }}
+          DB_KEY: ${{ secrets.DB_KEY }}
+          DB_PATH: ${{ runner.temp }}/crossfade.db
+      # 저장소가 커지지 않도록 data 브랜치에는 커밋을 하나만 둡니다.
+      - name: Save database
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout --orphan data-next
+          git rm -rfq --cached .
+          git add -f crossfade.db.enc
+          git commit -qm 'Update data'
+          git push -qf origin HEAD:data
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5
