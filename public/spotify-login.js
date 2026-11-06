@@ -25,6 +25,8 @@ export async function startSpotifyLogin({ spotifyClientId }) {
     state,
     code_challenge_method: 'S256',
     code_challenge: base64Url(digest),
+    // 이미 승인한 계정은 화면 없이 바로 돌아옵니다. 다른 계정으로 바꿀 수 있도록 항상 보여 줍니다.
+    show_dialog: 'true',
   });
   location.href = url.href;
 }

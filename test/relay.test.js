@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { test } from 'node:test';
-import { finishSpotifyLogin, sealForCollector, takeSpotifyCallback } from '../public/spotify-login.js';
+import { finishSpotifyLogin, sealForCollector, startSpotifyLogin, takeSpotifyCallback } from '../public/spotify-login.js';
 import worker from '../relay/worker.js';
 import { MAX_GROUPS, processQueue } from '../src/collect.js';
 import { openForCollector, publicKeyJwk } from '../src/crypto.js';
@@ -344,6 +344,19 @@ test('state가 다르면 토큰을 요청하지 않고, 미등록 계정은 403�
   await assert.rejects(finishSpotifyLogin(connect(), CODE, { code: 'c', state: 's' }), { status: 403 });
   assert.equal(posts.some((p) => p.pathname === '/queue'), false);
   globalThis.fetch = realFetch;
+});
+
+test('로그인을 시작하면 이미 승인한 계정도 Spotify 화면을 보여 준다', async () => {
+  const realFetch = globalThis.fetch;
+  fakeBrowser({});
+  globalThis.fetch = realFetch;
+  await startSpotifyLogin({ spotifyClientId: 'client' });
+
+  const url = new URL(location.href);
+  assert.equal(url.origin, 'https://accounts.spotify.com');
+  assert.equal(url.searchParams.get('show_dialog'), 'true');
+  assert.equal(url.searchParams.get('redirect_uri'), 'https://site.example/crossfade/');
+  assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
 });
 
 test('Spotify 콜백 주소만 인식한다', () => {

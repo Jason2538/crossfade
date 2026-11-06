@@ -917,7 +917,22 @@ function openAddDialog() {
     isStatic
       ? el(
           'button',
-          { class: 'btn primary', type: 'button', onclick: () => startSpotifyLogin(state.connect) },
+          {
+            class: 'btn primary',
+            type: 'button',
+            onclick: async (event) => {
+              const button = event.currentTarget;
+              button.disabled = true;
+              button.textContent = 'Spotify로 이동하는 중...';
+              try {
+                await startSpotifyLogin(state.connect);
+              } catch {
+                button.disabled = false;
+                button.textContent = 'Spotify로 로그인';
+                error.textContent = 'Spotify 로그인을 시작하지 못했어요. 다시 시도해 주세요.';
+              }
+            },
+          },
           'Spotify로 로그인',
         )
       : el('a', { class: 'btn primary', href: '/api/spotify/login' }, 'Spotify로 로그인'),
