@@ -3,7 +3,7 @@ import { finishSpotifyLogin, requestCollection, sendToCollector, startSpotifyLog
 
 const REFRESH_MS = 60_000;
 const MAX_WEEKS_BACK = 7;
-const SNAPSHOT_REFRESH_MS = 5 * 60_000;
+const SNAPSHOT_REFRESH_MS = 55_000;
 const COUNT_UP_MS = 900;
 const REFRESH_SPIN_MS = 500;
 const COLLECT_WATCH_MS = 15_000;
