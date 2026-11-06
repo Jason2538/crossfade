@@ -149,6 +149,14 @@ test('다른 그룹의 멤버는 뺄 수 없다', async () => {
   assert.equal(listMembers(db).length, 0);
 });
 
+test('공개 그룹의 멤버는 코드로 뺄 수 없다', async () => {
+  const db = groupDb();
+  const memberId = addMember(db, { name: '친구', lastfmUser: 'buddy', service: 'apple', joinedAt: NOW, groupId: listGroups(db)[0].id });
+  const relay = await queueOf({ kind: 'remove', code: CODE, memberId });
+  assert.deepEqual(await processQueue(db, fakeClient, relay, privateKey, NOW, { openCode: CODE }), ['0']);
+  assert.equal(listMembers(db).length, 1);
+});
+
 test('같은 친구가 여러 그룹에 들어갈 수 있다', async () => {
   const db = groupDb();
   addGroup(db, 'other-code', NOW);

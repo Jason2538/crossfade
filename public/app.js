@@ -36,6 +36,7 @@ const state = {
   invite: takeInviteCode(),
   gateError: null,
   connect: null,
+  openCode: null,
   pendingCode: null,
   spotifyCallback: takeSpotifyCallback(),
 };
@@ -169,6 +170,7 @@ async function loadSession() {
   if (!site) return api('/api/session');
 
   state.connect = site.connect;
+  state.openCode = site.openCode;
   state.pendingCode = savedPending();
   const session = { demo: false, spotifyLogin: false, static: true, authed: false };
   const saved = savedCode();
@@ -181,6 +183,11 @@ async function loadSession() {
       if (code === state.invite) state.gateError = failure.message;
       else if (failure.invalid) rememberCode(null);
     }
+  }
+  // 만들고 있는 새 그룹이 없으면 코드 없이 공개 그룹으로 바로 들어옵니다.
+  if (!session.authed && !state.pendingCode && !state.gateError && state.openCode) {
+    await unlockWithCode(state.openCode);
+    session.authed = true;
   }
   if (session.authed) state.gateError = null;
   state.invite = null;
@@ -204,7 +211,7 @@ async function createGroup(error) {
 }
 
 function leaveGroup() {
-  if (!confirm('이 기기에서 그룹을 나갈까요? 초대 코드가 있으면 다시 들어올 수 있어요.')) return;
+  if (!confirm('이 그룹에서 나가 다른 코드를 입력하거나 새 그룹을 만들까요?')) return;
   rememberCode(null);
   state.snapshot = null;
   state.session.authed = false;
@@ -225,7 +232,8 @@ async function completeSpotifyLogin() {
 
 async function shareInviteLink(event, code = state.snapshotCode) {
   const button = event.currentTarget;
-  const url = `${location.origin}${location.pathname}#invite=${encodeURIComponent(code)}`;
+  const hash = code === state.openCode ? '' : `#invite=${encodeURIComponent(code)}`;
+  const url = `${location.origin}${location.pathname}${hash}`;
   try {
     if (navigator.share) {
       await navigator.share({ title: '크로스페이드 초대', url });
@@ -329,6 +337,7 @@ function demoNotice() {
         { class: 'notice' },
         el('strong', {}, `${timeAgo(state.snapshot.generatedAt)} 업데이트됨. `),
         '기록은 15분쯤마다 모으며, 더 늦어질 수도 있어요.',
+        state.snapshotCode === state.openCode ? ' 이 그룹은 주소를 아는 사람 누구나 볼 수 있어요.' : '',
       ),
       state.snapshot.notices.map((message) => el('p', { class: 'notice', role: 'status' }, message)),
     ].flat();
@@ -782,7 +791,7 @@ async function renderMember(id) {
             )
           : el('div', { class: 'card empty' }, '이 주에는 기록이 없어요.'),
       ),
-      state.session.demo || (state.session.static && !state.connect)
+      state.session.demo || (state.session.static && (!state.connect || state.snapshotCode === state.openCode))
         ? null
         : el(
             'div',

@@ -90,6 +90,21 @@ test('수집을 반복해도 기록이 이어지고 평문은 남지 않는다',
   assert.equal(snapshot.overview[0].group.plays, 2);
 });
 
+test('공개 설정일 때만 site.json 에 코드를 넣는다', async () => {
+  const base = {
+    config: { tzOffsetMinutes: KST, inviteCode: 'invite', dbPath: join(dir, 'open.db') },
+    dbKey: 'db-key',
+    archivePath: join(dir, 'open.enc'),
+    outputDir: join(dir, 'open-site'),
+    client: fakeClient(),
+    gapMs: 0,
+  };
+  await collect(base);
+  assert.equal(JSON.parse(readFileSync(join(base.outputDir, 'site.json'))).openCode, null);
+  await collect({ ...base, openAccess: true });
+  assert.equal(JSON.parse(readFileSync(join(base.outputDir, 'site.json'))).openCode, 'invite');
+});
+
 test('DB를 풀 수 없으면 기록을 덮어쓰지 않고 멈춘다', async () => {
   const archivePath = join(dir, 'broken.enc');
   writeFileSync(archivePath, sealBytes('db', 'other-key'));

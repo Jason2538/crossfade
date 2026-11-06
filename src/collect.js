@@ -94,13 +94,15 @@ const HANDLERS = {
 };
 
 // 중계 대기열의 요청을 처리합니다. 초대 코드를 아는 사람만 그 그룹을 바꿀 수 있습니다. 처리한 항목의 id를 돌려줍니다.
-export async function processQueue(db, client, relay, privateKeyPem, now) {
+// 코드가 공개된 그룹은 누구나 요청할 수 있으므로 멤버 삭제를 받지 않습니다.
+export async function processQueue(db, client, relay, privateKeyPem, now, { openCode = null } = {}) {
   const done = [];
   for (const { id, sealed } of await relay.list()) {
     try {
       const request = openForCollector(sealed, privateKeyPem);
       const handler = Object.hasOwn(HANDLERS, request.kind) ? HANDLERS[request.kind] : null;
       const group = getGroupByCode(db, request.code);
+      if (request.kind === 'remove' && request.code === openCode) throw new Error('공개 그룹의 멤버는 뺄 수 없습니다.');
       if (handler && (group || request.kind === 'group')) await handler(db, client, request, now, group);
     } catch (error) {
       console.error('대기열 처리 실패:', error.constructor.name);
@@ -122,6 +124,7 @@ export async function collect({
   relay = null,
   tokenPrivateKey = null,
   connect = null,
+  openAccess = false,
 }) {
   // 복호화에 실패하면 여기서 멈춥니다. 빈 DB로 계속하면 쌓인 기록을 덮어쓰게 됩니다.
   if (existsSync(archivePath)) {
@@ -130,12 +133,13 @@ export async function collect({
   }
   const db = openDb(config.dbPath);
   saveDefaultGroup(db, config.inviteCode, nowSeconds());
+  const openCode = openAccess ? config.inviteCode : null;
   await applyMemberChange(db, client, change);
 
   let processed = [];
   if (relay) {
     try {
-      processed = await processQueue(db, client, relay, tokenPrivateKey, nowSeconds());
+      processed = await processQueue(db, client, relay, tokenPrivateKey, nowSeconds(), { openCode });
     } catch (error) {
       console.error('중계 서버 연결 실패:', error.message);
     }
@@ -151,7 +155,7 @@ export async function collect({
   rmSync(outputDir, { recursive: true, force: true });
   cpSync(join(ROOT, 'public'), outputDir, { recursive: true });
   mkdirSync(join(outputDir, 'groups'));
-  writeFileSync(join(outputDir, 'site.json'), JSON.stringify({ connect }));
+  writeFileSync(join(outputDir, 'site.json'), JSON.stringify({ connect, openCode }));
 
   const now = nowSeconds();
   for (const group of listGroups(db)) {
@@ -197,6 +201,7 @@ async function main() {
     }),
     config,
     dbKey,
+    openAccess: process.env.OPEN_ACCESS === '1',
     archivePath: process.env.DB_ARCHIVE || join(ROOT, 'crossfade.db.enc'),
     outputDir: join(ROOT, 'site'),
     client: createClient({ apiKey: config.apiKey, baseUrl: config.lastfmBaseUrl }),
