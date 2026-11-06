@@ -3,6 +3,15 @@ const ITERATIONS = 600_000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 
+// 그룹별 파일 이름입니다. 코드가 없으면 파일 주소를 알 수 없습니다.
+export async function groupFileId(code) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`crossfade-group-v1:${code}`));
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32);
+}
+
 export async function openSnapshot(sealed, code) {
   const salt = sealed.slice(0, SALT_BYTES);
   const iv = sealed.slice(SALT_BYTES, SALT_BYTES + IV_BYTES);

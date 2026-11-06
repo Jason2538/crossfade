@@ -103,19 +103,23 @@ function weekLabel(range, tzMinutes) {
   return { startsOn: format(range.start), endsOn: format(range.end - 1) };
 }
 
-export function buildOverview(db, { week, now, tzOffsetMinutes }) {
+export function buildOverview(db, { week, now, tzOffsetMinutes, groupId = null }) {
   const range = weekRange(week, now, tzOffsetMinutes);
   const previous = weekRange(week + 1, now, tzOffsetMinutes);
   const tasteStart = weekRange(week + TASTE_WEEKS - 1, now, tzOffsetMinutes).start;
 
-  const rows = scrobblesBetween(db, range.start, range.end);
+  const groupMembers = listMembers(db, groupId);
+  const memberIds = new Set(groupMembers.map((member) => member.id));
+  const groupRows = (start, end) => scrobblesBetween(db, start, end).filter((r) => memberIds.has(r.member_id));
+
+  const rows = groupRows(range.start, range.end);
   // 진행 중인 주는 지난주의 같은 시점까지만 비교해야 공정합니다.
   const previousEnd = Math.min(previous.end, previous.start + (now - range.start));
-  const previousRows = scrobblesBetween(db, previous.start, week === 0 ? previousEnd : previous.end);
-  const tasteRows = scrobblesBetween(db, tasteStart, range.end);
+  const previousRows = groupRows(previous.start, week === 0 ? previousEnd : previous.end);
+  const tasteRows = groupRows(tasteStart, range.end);
   const playing = nowPlayingMap(db);
 
-  const members = listMembers(db).map((member) => {
+  const members = groupMembers.map((member) => {
     const own = rows.filter((r) => r.member_id === member.id);
     const before = previousRows.filter((r) => r.member_id === member.id);
     return {

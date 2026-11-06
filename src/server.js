@@ -203,17 +203,19 @@ export async function registerMember(db, client, body) {
   const name = String(body.name ?? '').trim();
   const lastfmUser = String(body.lastfmUser ?? '').trim();
   const service = body.service;
+  const groupId = body.groupId ?? 1;
 
   if (!name || name.length > 20) throw new HttpError(400, '이름은 1~20자로 입력해 주세요.');
   if (!/^[A-Za-z][\w-]{1,14}$/.test(lastfmUser)) throw new HttpError(400, 'Last.fm 사용자 이름을 확인해 주세요.');
   if (service !== 'spotify' && service !== 'apple') throw new HttpError(400, '사용하는 서비스를 골라 주세요.');
-  if (listMembers(db).length >= MAX_MEMBERS) throw new HttpError(400, '그룹이 가득 찼어요.');
-  if (listMembers(db).some((m) => m.lastfm_user.toLowerCase() === lastfmUser.toLowerCase())) {
+  const members = listMembers(db, groupId);
+  if (members.length >= MAX_MEMBERS) throw new HttpError(400, '그룹이 가득 찼어요.');
+  if (members.some((m) => m.lastfm_user.toLowerCase() === lastfmUser.toLowerCase())) {
     throw new HttpError(409, '이미 추가된 Last.fm 계정이에요.');
   }
 
   const profile = await verifyLastfmUser(client, lastfmUser);
-  return addMember(db, { name, lastfmUser: profile.name, service, joinedAt: nowSeconds() });
+  return addMember(db, { name, lastfmUser: profile.name, service, joinedAt: nowSeconds(), groupId });
 }
 
 async function connectSpotify(db, spotify, code, verifier) {
@@ -222,7 +224,7 @@ async function connectSpotify(db, spotify, code, verifier) {
   return saveSpotifyLogin(db, { profile, tokens, now: nowSeconds() });
 }
 
-export function saveSpotifyLogin(db, { profile, tokens, now }) {
+export function saveSpotifyLogin(db, { profile, tokens, now, groupId = 1 }) {
 
   // 이미 연결된 친구는 인원이 다 찼어도 토큰이 만료되면 다시 로그인할 수 있어야 합니다.
   const existing = findSpotifyAccount(db, profile.id);
@@ -235,6 +237,7 @@ export function saveSpotifyLogin(db, { profile, tokens, now }) {
       lastfmUser: `spotify:${profile.id}`,
       service: 'spotify',
       joinedAt: now,
+      groupId,
     });
 
   saveSpotifyAccount(db, {

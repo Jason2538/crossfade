@@ -1,5 +1,5 @@
-import { openSnapshot } from './snapshot.js';
-import { finishSpotifyLogin, startSpotifyLogin, takeSpotifyCallback } from './spotify-login.js';
+import { groupFileId, openSnapshot } from './snapshot.js';
+import { finishSpotifyLogin, sendToCollector, startSpotifyLogin, takeSpotifyCallback } from './spotify-login.js';
 
 const REFRESH_MS = 60_000;
 const MAX_WEEKS_BACK = 7;
@@ -7,6 +7,9 @@ const SNAPSHOT_REFRESH_MS = 5 * 60_000;
 // 수집이 이보다 오래 멈췄다면 "지금 듣는 중"은 더 이상 지금이 아닙니다.
 const NOW_PLAYING_TTL_SECONDS = 30 * 60;
 const CODE_STORAGE_KEY = 'crossfade.inviteCode';
+const PENDING_STORAGE_KEY = 'crossfade.pendingGroup';
+const CODE_LETTERS = 'abcdefghjkmnpqrstuvwxyz23456789';
+const QUEUED_MESSAGE = '요청을 보냈어요. 다음 수집 때(15분쯤) 반영돼요.';
 const SERVICE_NAMES = { spotify: 'Spotify', apple: 'Apple Music' };
 const DAY_NAMES = ['월', '화', '수', '목', '금', '토', '일'];
 
@@ -32,6 +35,8 @@ const state = {
   snapshotLoadedAt: 0,
   invite: takeInviteCode(),
   gateError: null,
+  connect: null,
+  pendingCode: null,
   spotifyCallback: takeSpotifyCallback(),
 };
 
@@ -96,10 +101,39 @@ function rememberCode(code) {
   }
 }
 
-// GitHub Pages에는 data.enc 가 있고, 로컬 서버에는 없습니다.
-async function fetchSealed() {
+function savedPending() {
   try {
-    const response = await fetch(`data.enc?t=${Date.now()}`, { cache: 'no-store' });
+    return localStorage.getItem(PENDING_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberPending(code) {
+  state.pendingCode = code;
+  try {
+    if (code) localStorage.setItem(PENDING_STORAGE_KEY, code);
+    else localStorage.removeItem(PENDING_STORAGE_KEY);
+  } catch {
+    // 저장하지 못해도 이번 방문에서는 계속 기다릴 수 있습니다.
+  }
+}
+
+// GitHub Pages에는 site.json 이 있고, 로컬 서버에는 없습니다.
+async function fetchSiteConfig() {
+  try {
+    const response = await fetch(`site.json?t=${Date.now()}`, { cache: 'no-store' });
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSealed(code) {
+  try {
+    const id = await groupFileId(code);
+    const response = await fetch(`groups/${id}.enc?t=${Date.now()}`, { cache: 'no-store' });
+    if (response.status === 404) return 'missing';
     return response.ok ? new Uint8Array(await response.arrayBuffer()) : null;
   } catch {
     return null;
@@ -112,21 +146,40 @@ async function unlock(sealed, code) {
   state.snapshotLoadedAt = Date.now();
 }
 
-async function loadSession() {
-  const sealed = await fetchSealed();
-  if (!sealed) return api('/api/session');
+function invalidCode(message) {
+  const error = new Error(message);
+  error.invalid = true;
+  return error;
+}
 
+async function unlockWithCode(code) {
+  const sealed = await fetchSealed(code);
+  if (sealed === 'missing') throw invalidCode('코드가 맞지 않거나, 아직 준비 중인 새 그룹이에요.');
+  if (!sealed) throw new Error('기록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+  try {
+    await unlock(sealed, code);
+  } catch {
+    throw invalidCode('초대 코드가 맞지 않아요.');
+  }
+  rememberCode(code);
+}
+
+async function loadSession() {
+  const site = await fetchSiteConfig();
+  if (!site) return api('/api/session');
+
+  state.connect = site.connect;
+  state.pendingCode = savedPending();
   const session = { demo: false, spotifyLogin: false, static: true, authed: false };
   const saved = savedCode();
   for (const code of [state.invite, saved]) {
     if (!code || session.authed) continue;
     try {
-      await unlock(sealed, code);
-      rememberCode(code);
+      await unlockWithCode(code);
       session.authed = true;
-    } catch {
-      if (code === saved) rememberCode(null);
-      else state.gateError = '초대 링크가 맞지 않아요. 코드를 직접 입력해 주세요.';
+    } catch (failure) {
+      if (code === state.invite) state.gateError = failure.message;
+      else if (failure.invalid) rememberCode(null);
     }
   }
   if (session.authed) state.gateError = null;
@@ -134,21 +187,45 @@ async function loadSession() {
   return session;
 }
 
+function createCode() {
+  const letters = [...crypto.getRandomValues(new Uint8Array(16))].map((byte) => CODE_LETTERS[byte % CODE_LETTERS.length]);
+  return [0, 4, 8, 12].map((start) => letters.slice(start, start + 4).join('')).join('-');
+}
+
+async function createGroup(error) {
+  try {
+    const code = createCode();
+    await sendToCollector(state.connect, { kind: 'group', code });
+    rememberPending(code);
+    render();
+  } catch (failure) {
+    error.textContent = failure.message;
+  }
+}
+
+function leaveGroup() {
+  if (!confirm('이 기기에서 그룹을 나갈까요? 초대 코드가 있으면 다시 들어올 수 있어요.')) return;
+  rememberCode(null);
+  state.snapshot = null;
+  state.session.authed = false;
+  render();
+}
+
 async function completeSpotifyLogin() {
   const callback = state.spotifyCallback;
   if (!callback) return;
   state.spotifyCallback = null;
   try {
-    const result = callback.code ? await finishSpotifyLogin(state.snapshot.connect, callback) : 'denied';
+    const result = callback.code ? await finishSpotifyLogin(state.connect, state.snapshotCode, callback) : 'denied';
     state.flash = SPOTIFY_MESSAGES[result];
   } catch (failure) {
     state.flash = SPOTIFY_MESSAGES[failure.status === 403 ? 'notAllowed' : 'failed'];
   }
 }
 
-async function shareInviteLink(event) {
+async function shareInviteLink(event, code = state.snapshotCode) {
   const button = event.currentTarget;
-  const url = `${location.origin}${location.pathname}#invite=${encodeURIComponent(state.snapshotCode)}`;
+  const url = `${location.origin}${location.pathname}#invite=${encodeURIComponent(code)}`;
   try {
     if (navigator.share) {
       await navigator.share({ title: '크로스페이드 초대', url });
@@ -166,8 +243,8 @@ async function shareInviteLink(event) {
 
 async function refreshSnapshot() {
   if (!state.snapshot || Date.now() - state.snapshotLoadedAt < SNAPSHOT_REFRESH_MS) return;
-  const sealed = await fetchSealed();
-  if (!sealed) return;
+  const sealed = await fetchSealed(state.snapshotCode);
+  if (!sealed || sealed === 'missing') return;
   try {
     await unlock(sealed, state.snapshotCode);
   } catch {
@@ -246,12 +323,15 @@ function header() {
 function demoNotice() {
   if (state.flash) return el('p', { class: 'notice', role: 'status' }, state.flash);
   if (state.snapshot) {
-    return el(
-      'p',
-      { class: 'notice' },
-      el('strong', {}, `${timeAgo(state.snapshot.generatedAt)} 업데이트됨. `),
-      '기록은 15분쯤마다 모으며, 더 늦어질 수도 있어요.',
-    );
+    return [
+      el(
+        'p',
+        { class: 'notice' },
+        el('strong', {}, `${timeAgo(state.snapshot.generatedAt)} 업데이트됨. `),
+        '기록은 15분쯤마다 모으며, 더 늦어질 수도 있어요.',
+      ),
+      state.snapshot.notices.map((message) => el('p', { class: 'notice', role: 'status' }, message)),
+    ].flat();
   }
   if (!state.session.demo) return null;
   return el(
@@ -547,6 +627,9 @@ async function renderHome() {
       ),
       fader(members),
       members.length ? [nowPlayingSection(members), rankingSection(data), tasteSection(data)] : emptyHome(),
+      state.session.static
+        ? el('p', { class: 'footnote' }, el('button', { class: 'link-button', type: 'button', onclick: leaveGroup }, '다른 그룹으로 이동'))
+        : null,
     ),
   );
 }
@@ -699,7 +782,7 @@ async function renderMember(id) {
             )
           : el('div', { class: 'card empty' }, '이 주에는 기록이 없어요.'),
       ),
-      state.session.demo || state.session.static
+      state.session.demo || (state.session.static && !state.connect)
         ? null
         : el(
             'div',
@@ -712,7 +795,12 @@ async function renderMember(id) {
                 type: 'button',
                 onclick: async () => {
                   if (!confirm(`${data.name} 님을 그룹에서 뺄까요? 저장된 기록도 삭제됩니다.`)) return;
-                  await api(`/api/member?id=${id}`, { method: 'DELETE' });
+                  if (state.session.static) {
+                    await sendToCollector(state.connect, { kind: 'remove', code: state.snapshotCode, memberId: Number(id) });
+                    state.flash = QUEUED_MESSAGE;
+                  } else {
+                    await api(`/api/member?id=${id}`, { method: 'DELETE' });
+                  }
                   location.hash = '#/';
                 },
               },
@@ -723,19 +811,40 @@ async function renderMember(id) {
   );
 }
 
-async function unlockWithCode(code) {
-  const sealed = await fetchSealed();
-  if (!sealed) throw new Error('기록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
-  try {
-    await unlock(sealed, code);
-  } catch {
-    throw new Error('초대 코드가 맞지 않아요.');
-  }
-  rememberCode(code);
+function renderWaiting() {
+  const code = state.pendingCode;
+  app.replaceChildren(
+    el(
+      'main',
+      { class: 'gate' },
+      el(
+        'div',
+        { class: 'card gate-card' },
+        el('img', { src: 'favicon.svg', alt: '', width: '36', height: '36' }),
+        el('h1', {}, '새 그룹을 만들고 있어요'),
+        el('p', {}, '다음 수집 때(15분쯤) 자동으로 열려요. 그동안 이 코드를 저장해 두세요.'),
+        el('p', { class: 'group-code' }, code),
+        el('button', { class: 'btn primary', type: 'button', onclick: (event) => shareInviteLink(event, code) }, '초대 링크'),
+        el(
+          'button',
+          {
+            class: 'link-button',
+            type: 'button',
+            onclick: () => {
+              rememberPending(null);
+              render();
+            },
+          },
+          '다른 코드 입력하기',
+        ),
+      ),
+    ),
+  );
 }
 
 function renderGate() {
   const error = el('p', { class: 'form-error', role: 'alert' }, state.gateError);
+  state.gateError = null;
   const input = el('input', { type: 'password', name: 'code', autocomplete: 'off', required: true, autofocus: true });
   app.replaceChildren(
     el(
@@ -748,7 +857,7 @@ function renderGate() {
           onsubmit: async (event) => {
             event.preventDefault();
             try {
-              if (state.session.static) await unlockWithCode(input.value.trim());
+              if (state.session.static) await unlockWithCode(input.value.trim().toLowerCase());
               else await api('/api/session', { method: 'POST', body: JSON.stringify({ code: input.value }) });
               state.session.authed = true;
               render();
@@ -763,6 +872,9 @@ function renderGate() {
         el('label', { class: 'field' }, el('span', {}, '초대 코드'), input),
         error,
         el('button', { class: 'btn primary', type: 'submit' }, '들어가기'),
+        state.connect
+          ? el('button', { class: 'btn', type: 'button', onclick: () => createGroup(error) }, '새 그룹 만들기')
+          : null,
       ),
     ),
   );
@@ -786,23 +898,24 @@ const JOIN_STEP = '이름과 Last.fm 사용자 이름, 쓰는 서비스를 그�
 
 function openAddDialog() {
   const isStatic = state.session.static;
+  const readOnly = isStatic && !state.connect;
   const error = el('p', { class: 'form-error', role: 'alert' });
   const steps = el('ol', { class: 'steps' });
-  const canSpotifyLogin = isStatic ? Boolean(state.snapshot?.connect) : state.session.spotifyLogin;
+  const canSpotifyLogin = isStatic ? Boolean(state.connect?.spotifyClientId) : state.session.spotifyLogin;
   const spotifyLogin = el(
     'div',
     { class: 'spotify-login' },
     isStatic
       ? el(
           'button',
-          { class: 'btn primary', type: 'button', onclick: () => startSpotifyLogin(state.snapshot.connect) },
+          { class: 'btn primary', type: 'button', onclick: () => startSpotifyLogin(state.connect) },
           'Spotify로 로그인',
         )
       : el('a', { class: 'btn primary', href: '/api/spotify/login' }, 'Spotify로 로그인'),
     el('p', {}, '최대 5명까지 가능하고, 관리자가 Spotify 앱에 이메일을 등록한 계정만 로그인할 수 있어요. 아래처럼 Last.fm으로 연결해도 됩니다.'),
   );
   const showSteps = (service) => {
-    const texts = isStatic ? [...SETUP_STEPS[service].slice(0, -1), JOIN_STEP] : SETUP_STEPS[service];
+    const texts = readOnly ? [...SETUP_STEPS[service].slice(0, -1), JOIN_STEP] : SETUP_STEPS[service];
     steps.replaceChildren(...texts.map((text) => el('li', {}, text)));
     spotifyLogin.hidden = service !== 'spotify' || !canSpotifyLogin;
   };
@@ -822,19 +935,22 @@ function openAddDialog() {
     {
       onsubmit: async (event) => {
         event.preventDefault();
-        if (isStatic) return;
+        if (readOnly) return;
         const fields = new FormData(form);
+        const member = {
+          name: fields.get('name').trim(),
+          lastfmUser: fields.get('lastfmUser').trim(),
+          service: fields.get('service'),
+        };
         submit.disabled = true;
         error.textContent = '';
         try {
-          await api('/api/members', {
-            method: 'POST',
-            body: JSON.stringify({
-              name: fields.get('name'),
-              lastfmUser: fields.get('lastfmUser'),
-              service: fields.get('service'),
-            }),
-          });
+          if (isStatic) {
+            await sendToCollector(state.connect, { kind: 'member', code: state.snapshotCode, ...member });
+            state.flash = QUEUED_MESSAGE;
+          } else {
+            await api('/api/members', { method: 'POST', body: JSON.stringify(member) });
+          }
           dialog.close();
           render();
         } catch (failure) {
@@ -852,7 +968,7 @@ function openAddDialog() {
     ),
     spotifyLogin,
     steps,
-    isStatic
+    readOnly
       ? null
       : [
           el('label', { class: 'field' }, el('span', {}, '이름'), el('input', { type: 'text', name: 'name', maxlength: '20', required: true })),
@@ -868,7 +984,7 @@ function openAddDialog() {
       'div',
       { class: 'form-actions' },
       el('button', { class: 'btn', type: 'button', onclick: () => dialog.close() }, '닫기'),
-      isStatic ? null : submit,
+      readOnly ? null : submit,
     ),
   );
 
@@ -922,7 +1038,17 @@ async function render() {
   try {
     if (!state.session) state.session = await loadSession();
     await refreshSnapshot();
-    if (!state.session.authed) return renderGate();
+    if (!state.session.authed) {
+      if (!state.pendingCode) return renderGate();
+      try {
+        await unlockWithCode(state.pendingCode);
+        rememberPending(null);
+        state.session.authed = true;
+      } catch {
+        state.refreshTimer = setTimeout(render, REFRESH_MS);
+        return renderWaiting();
+      }
+    }
     await completeSpotifyLogin();
 
     const memberId = location.hash.match(/^#\/member\/(\d+)$/)?.[1];

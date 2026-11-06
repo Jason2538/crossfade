@@ -2,6 +2,7 @@ import {
   constants,
   createCipheriv,
   createDecipheriv,
+  createHash,
   createPublicKey,
   pbkdf2Sync,
   privateDecrypt,
@@ -31,6 +32,9 @@ export function openBytes(sealed, passphrase) {
   decipher.setAuthTag(sealed.subarray(sealed.length - TAG_BYTES));
   return Buffer.concat([decipher.update(sealed.subarray(SALT_BYTES + IV_BYTES, sealed.length - TAG_BYTES)), decipher.final()]);
 }
+
+// public/snapshot.js 의 groupFileId 와 같은 값을 만듭니다.
+export const groupFileId = (code) => createHash('sha256').update(`crossfade-group-v1:${code}`).digest('hex').slice(0, 32);
 
 export const publicKeyJwk = (privateKeyPem) => createPublicKey(privateKeyPem).export({ format: 'jwk' });
 

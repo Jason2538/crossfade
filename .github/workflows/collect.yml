@@ -63,7 +63,6 @@ jobs:
           DB_KEY: ${{ secrets.DB_KEY }}
           SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
           RELAY_URL: ${{ vars.RELAY_URL }}
-          RELAY_WRITE_KEY: ${{ secrets.RELAY_WRITE_KEY }}
           RELAY_READ_KEY: ${{ secrets.RELAY_READ_KEY }}
           TOKEN_PRIVATE_KEY: ${{ secrets.TOKEN_PRIVATE_KEY }}
           DB_PATH: ${{ runner.temp }}/crossfade.db

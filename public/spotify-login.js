@@ -52,6 +52,17 @@ export async function sealForCollector(payload, publicKeyJwk) {
   };
 }
 
+// 그룹 만들기, 친구 추가처럼 수집기가 처리할 요청을 중계 대기열에 넣습니다.
+export async function sendToCollector(connect, payload) {
+  const response = await fetch(`${connect.relayUrl}/queue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sealed: await sealForCollector(payload, connect.tokenPublicKey) }),
+  });
+  if (response.status === 429) throw new Error('요청이 너무 많아요. 내일 다시 시도해 주세요.');
+  if (!response.ok) throw new Error('요청을 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
+}
+
 async function spotifyRequest(url, options) {
   const response = await fetch(url, options);
   const body = await response.json().catch(() => null);
@@ -63,7 +74,7 @@ async function spotifyRequest(url, options) {
   return body;
 }
 
-export async function finishSpotifyLogin(connect, { code, state }) {
+export async function finishSpotifyLogin(connect, groupCode, { code, state }) {
   const login = JSON.parse(localStorage.getItem(LOGIN_KEY) ?? 'null');
   localStorage.removeItem(LOGIN_KEY);
   if (!login || login.state !== state) throw new Error('로그인 상태가 맞지 않아요.');
@@ -83,21 +94,14 @@ export async function finishSpotifyLogin(connect, { code, state }) {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   });
 
-  const sealed = await sealForCollector(
-    {
-      spotifyId: profile.id,
-      displayName: profile.display_name ?? '',
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiresAt: Math.floor(Date.now() / 1000) + Number(tokens.expires_in),
-    },
-    connect.tokenPublicKey,
-  );
-  const response = await fetch(`${connect.relayUrl}/logins`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connect.relayWriteKey}` },
-    body: JSON.stringify({ sealed }),
+  await sendToCollector(connect, {
+    kind: 'spotify',
+    code: groupCode,
+    spotifyId: profile.id,
+    displayName: profile.display_name ?? '',
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt: Math.floor(Date.now() / 1000) + Number(tokens.expires_in),
   });
-  if (!response.ok) throw new Error('중계 서버 오류');
   return 'queued';
 }

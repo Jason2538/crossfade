@@ -48,22 +48,25 @@ Spotify 친구는 Last.fm 없이 Spotify 계정으로 바로 연결할 수도 �
 
 서버 없이 `.github/workflows/collect.yml` 이 15분쯤마다 기록을 모아 정적 사이트를 다시 올립니다.
 
-- 공개 저장소에서 동작합니다. 청취 기록은 `site/data.enc` 에 초대 코드로, 누적 DB는 `data` 브랜치에 `DB_KEY` 로 암호화해 저장합니다.
+- 공개 저장소에서 동작합니다. 청취 기록은 그룹별로 `site/groups/` 에 초대 코드로, 누적 DB는 `data` 브랜치에 `DB_KEY` 로 암호화해 저장합니다.
 - 저장소 Secrets에 `LASTFM_API_KEY`, `INVITE_CODE`, `DB_KEY` 를 넣고, Pages의 Source를 GitHub Actions로 설정합니다.
 - 사이트의 "초대 링크" 버튼으로 링크를 공유합니다. 받은 사람은 링크만 누르면 입장하고, 코드는 기기에 저장되어 다음부터 자동으로 들어옵니다. 링크에는 초대 코드가 들어 있으니 그룹 밖에 공유하면 안 됩니다.
 - 브라우저 메뉴의 "홈 화면에 추가"로 앱처럼 설치할 수 있습니다. 아이폰은 설치한 앱에서 코드를 한 번 입력해야 합니다.
-- Last.fm 친구의 추가와 삭제는 Actions 탭에서 `collect` 워크플로를 직접 실행해 입력합니다.
+- 첫 화면의 "새 그룹 만들기"로 누구나 새 코드와 빈 그룹을 만들 수 있습니다. 그룹은 다음 수집 때 열리고, 그룹마다 기록이 따로 보입니다. 전체 그룹 수는 20개로 제한합니다.
+- 친구 추가와 삭제는 사이트에서 요청하고 다음 수집 때 반영됩니다. 1번 그룹은 Actions 탭에서 `collect` 워크플로를 직접 실행해 바꿀 수도 있습니다.
 - "지금 듣는 중"은 다음 수집 때까지 늦게 반영됩니다.
 
-### Spotify 로그인
+### 중계 서버와 Spotify 로그인
 
-Spotify 친구는 Last.fm으로 연결하거나 Spotify 계정으로 바로 로그인할 수 있습니다. 로그인은 브라우저가 PKCE로 처리하고, `relay/` 의 Cloudflare Worker가 수집기에 넘겨 줍니다. 토큰은 브라우저에서 수집기 공개 키로 암호화되므로 Worker는 읽을 수 없습니다.
+그룹 만들기, 친구 추가, Spotify 로그인은 `relay/` 의 Cloudflare Worker 대기열을 거쳐 수집기로 전달됩니다. 요청은 브라우저에서 수집기 공개 키로 암호화되므로 Worker는 읽을 수 없고, 수집기는 초대 코드가 맞는 그룹에만 반영합니다.
+
+Spotify 친구는 Last.fm으로 연결하거나 Spotify 계정으로 바로 로그인할 수 있습니다. Spotify 로그인은 모든 그룹을 합쳐 5명까지이고, 계정 하나는 한 그룹에만 연결됩니다.
 
 1. Spotify 앱의 Redirect URI에 사이트 주소(`https://<사용자>.github.io/crossfade/`)를 등록하고, Users Management에 친구의 Spotify 이메일을 추가합니다.
-2. `relay/` 에서 KV를 만들어 `wrangler.toml` 에 id를 넣고, `WRITE_KEY`, `READ_KEY` 비밀값을 설정한 뒤 배포합니다.
-3. 저장소 Variables에 `SPOTIFY_CLIENT_ID`, `RELAY_URL` 을, Secrets에 `RELAY_WRITE_KEY`, `RELAY_READ_KEY`, `TOKEN_PRIVATE_KEY`(RSA 2048 PEM)를 넣습니다.
+2. `relay/` 에서 KV를 만들어 `wrangler.toml` 에 id를 넣고, `READ_KEY` 비밀값을 설정한 뒤 배포합니다.
+3. 저장소 Variables에 `SPOTIFY_CLIENT_ID`, `RELAY_URL` 을, Secrets에 `RELAY_READ_KEY`, `TOKEN_PRIVATE_KEY`(RSA 2048 PEM)를 넣습니다.
 
-값을 모두 넣으면 다음 수집부터 로그인 버튼이 나타납니다.
+값을 모두 넣으면 다음 수집부터 새 그룹 만들기와 로그인 버튼이 나타납니다.
 - GitHub 약관은 Actions를 서버리스 앱의 일부로 쓰지 말라고 안내합니다. 쓰기 전에 [약관](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features)을 확인하세요.
 
 ## Last.fm을 쓰는 이유
@@ -90,7 +93,7 @@ src/stats.js    주간 통계, 취향 비교
 src/server.js   HTTP 서버, 초대 코드 인증
 src/collect.js  GitHub Actions용 수집과 암호화된 사이트 생성
 src/crypto.js   저장 데이터 암호화
-relay/          Spotify 로그인을 수집기로 넘기는 Cloudflare Worker
+relay/          사이트의 요청을 수집기로 넘기는 Cloudflare Worker
 src/demo.js     데모용 샘플 데이터
 public/         화면
 ```

@@ -984,6 +984,36 @@ fieldset.field {
   gap: 8px;
 }
 
+.gate-card .btn + .btn {
+  margin-top: 8px;
+}
+
+.gate-card .group-code {
+  margin-bottom: 16px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  user-select: all;
+  word-break: break-all;
+}
+
+.link-button {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.gate-card .link-button {
+  display: block;
+  margin: 12px auto 0;
+}
+
 .gate-card .btn {
   width: 100%;
 }

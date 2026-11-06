@@ -1,4 +1,4 @@
-// relay/worker.js 에 쌓인 Spotify 로그인을 수집기가 가져갑니다.
+// relay/worker.js 대기열에 쌓인 요청을 수집기가 가져갑니다.
 export function createRelayClient({ url, readKey }) {
   const request = async (path, options = {}) => {
     const response = await fetch(`${url}${path}`, {
@@ -11,7 +11,7 @@ export function createRelayClient({ url, readKey }) {
   };
 
   return {
-    list: async () => (await request('/logins')).logins,
-    remove: (id) => request(`/logins/${id}`, { method: 'DELETE' }),
+    list: async () => (await request('/queue')).items,
+    remove: (id) => request(`/queue/${id}`, { method: 'DELETE' }),
   };
 }

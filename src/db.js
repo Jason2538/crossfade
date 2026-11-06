@@ -2,16 +2,34 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS members (
+const MEMBERS_COLUMNS = `
     id INTEGER PRIMARY KEY,
+    group_id INTEGER NOT NULL DEFAULT 1,
     name TEXT NOT NULL,
-    lastfm_user TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    lastfm_user TEXT NOT NULL COLLATE NOCASE,
     service TEXT NOT NULL CHECK (service IN ('spotify', 'apple')),
     joined_at INTEGER NOT NULL,
     last_synced_at INTEGER,
-    last_error TEXT
+    last_error TEXT,
+    UNIQUE (group_id, lastfm_user)
+`;
+
+const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS groups (
+    id INTEGER PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
   );
+
+  -- 친구 추가 실패처럼 다음 수집 때에야 알 수 있는 일을 그룹 화면에 보여 줍니다.
+  CREATE TABLE IF NOT EXISTS group_notices (
+    id INTEGER PRIMARY KEY,
+    group_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS members (${MEMBERS_COLUMNS});
 
   CREATE TABLE IF NOT EXISTS scrobbles (
     id INTEGER PRIMARY KEY,
@@ -55,25 +73,75 @@ const SCHEMA = `
 export function openDb(path) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
+  addGroupColumn(db);
   db.exec('PRAGMA foreign_keys = ON');
   db.exec(SCHEMA);
   return db;
 }
 
+// 그룹이 생기기 전의 DB를 옮깁니다. 기존 멤버는 모두 1번 그룹이 됩니다.
+function addGroupColumn(db) {
+  const columns = db.prepare('PRAGMA table_info(members)').all();
+  if (!columns.length || columns.some((column) => column.name === 'group_id')) return;
+  // 외래 키가 켜져 있으면 DROP TABLE 이 scrobbles 까지 지웁니다.
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec(`
+    BEGIN;
+    CREATE TABLE members_new (${MEMBERS_COLUMNS});
+    INSERT INTO members_new (id, name, lastfm_user, service, joined_at, last_synced_at, last_error)
+      SELECT id, name, lastfm_user, service, joined_at, last_synced_at, last_error FROM members;
+    DROP TABLE members;
+    ALTER TABLE members_new RENAME TO members;
+    COMMIT;
+  `);
+}
+
 export function resetDb(db) {
   db.exec(
-    'DELETE FROM track_lengths; DELETE FROM spotify_accounts; DELETE FROM now_playing; DELETE FROM scrobbles; DELETE FROM members;',
+    'DELETE FROM track_lengths; DELETE FROM spotify_accounts; DELETE FROM now_playing; DELETE FROM scrobbles; DELETE FROM members; DELETE FROM group_notices; DELETE FROM groups;',
   );
 }
 
-export function listMembers(db) {
-  return db.prepare('SELECT * FROM members ORDER BY id').all();
+export function listGroups(db) {
+  return db.prepare('SELECT * FROM groups ORDER BY id').all();
 }
 
-export function addMember(db, { name, lastfmUser, service, joinedAt }) {
+export function getGroupByCode(db, code) {
+  return db.prepare('SELECT * FROM groups WHERE code = ?').get(code);
+}
+
+export function addGroup(db, code, createdAt) {
+  return Number(db.prepare('INSERT INTO groups (code, created_at) VALUES (?, ?)').run(code, createdAt).lastInsertRowid);
+}
+
+// 1번 그룹의 코드는 INVITE_CODE 를 따릅니다.
+export function saveDefaultGroup(db, code, createdAt) {
+  db.prepare(
+    `INSERT INTO groups (id, code, created_at) VALUES (1, ?, ?)
+     ON CONFLICT (id) DO UPDATE SET code = excluded.code`,
+  ).run(code, createdAt);
+}
+
+export function addNotice(db, groupId, message, createdAt) {
+  db.prepare('INSERT INTO group_notices (group_id, message, created_at) VALUES (?, ?, ?)').run(groupId, message, createdAt);
+}
+
+export function listNotices(db, groupId, since) {
+  return db
+    .prepare('SELECT message FROM group_notices WHERE group_id = ? AND created_at >= ? ORDER BY id DESC')
+    .all(groupId, since)
+    .map((row) => row.message);
+}
+
+export function listMembers(db, groupId = null) {
+  if (groupId === null) return db.prepare('SELECT * FROM members ORDER BY id').all();
+  return db.prepare('SELECT * FROM members WHERE group_id = ? ORDER BY id').all(groupId);
+}
+
+export function addMember(db, { name, lastfmUser, service, joinedAt, groupId = 1 }) {
   const result = db
-    .prepare('INSERT INTO members (name, lastfm_user, service, joined_at) VALUES (?, ?, ?, ?)')
-    .run(name, lastfmUser, service, joinedAt);
+    .prepare('INSERT INTO members (group_id, name, lastfm_user, service, joined_at) VALUES (?, ?, ?, ?, ?)')
+    .run(groupId, name, lastfmUser, service, joinedAt);
   return Number(result.lastInsertRowid);
 }
 
