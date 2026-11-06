@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { test } from 'node:test';
 import { finishSpotifyLogin, sealForCollector, startSpotifyLogin, takeSpotifyCallback } from '../public/spotify-login.js';
 import worker from '../relay/worker.js';
-import { MAX_GROUPS, processQueue } from '../src/collect.js';
+import { buildSnapshot, MAX_GROUPS, processQueue } from '../src/collect.js';
 import { openForCollector, publicKeyJwk, sealLiveToken } from '../src/crypto.js';
 import {
   addGroup,
@@ -205,6 +205,40 @@ test('지금 듣는 곡은 사이트에서만, 암호화된 토큰으로만 Last
   assert.equal(body.nowPlaying.track, 'Now');
   assert.equal(body.lastPlayed.track, 'Before');
   assert.equal(body.lastPlayed.played_at, 1000);
+});
+
+test('Spotify 친구의 지금 듣는 곡은 access token만으로 바로 읽는다', async () => {
+  const LIVE_KEY = 'ab'.repeat(32);
+  const db = groupDb();
+  const [group] = listGroups(db);
+  await processQueue(db, fakeClient, await queueOf(login('friend')), privateKey, NOW);
+  const [member] = listMembers(db, group.id);
+  const { liveTokens } = buildSnapshot(db, group.id, { now: NOW, tzOffsetMinutes: 540, liveKey: LIVE_KEY });
+  const url = `/now?t=${encodeURIComponent(liveTokens[member.id])}`;
+  const env = { ...fakeEnv(), LIVE_KEY, LASTFM_API_KEY: 'key' };
+
+  const realFetch = globalThis.fetch;
+  const headers = [];
+  globalThis.fetch = async (target, options) => {
+    headers.push(options.headers.Authorization);
+    if (String(target).includes('currently-playing')) {
+      return Response.json({ is_playing: true, item: { type: 'track', name: 'Now', artists: [{ name: 'A' }], album: { name: 'B', images: [] } } });
+    }
+    return Response.json({ items: [{ played_at: '2026-11-06T00:00:00Z', track: { name: 'Before', artists: [{ name: 'C' }] } }] });
+  };
+  const body = await (await call(env, url, { origin: ORIGIN })).json();
+  globalThis.fetch = async () => new Response(null, { status: 401 });
+  const expired = await call(env, url, { origin: ORIGIN });
+  globalThis.fetch = async (target) =>
+    String(target).includes('currently-playing') ? new Response(null, { status: 204 }) : Response.json({ items: [] });
+  const idle = await (await call(env, url, { origin: ORIGIN })).json();
+  globalThis.fetch = realFetch;
+
+  assert.deepEqual([...new Set(headers)], ['Bearer access']);
+  assert.equal(body.nowPlaying.track, 'Now');
+  assert.equal(body.lastPlayed.track, 'Before');
+  assert.equal(expired.status, 502);
+  assert.deepEqual(idle, { nowPlaying: null, lastPlayed: null });
 });
 
 test('수집 시작에 실패해도 요청은 대기열에 남는다', async () => {

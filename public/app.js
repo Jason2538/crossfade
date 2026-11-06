@@ -357,7 +357,7 @@ function withLive(data) {
   return { ...data, members };
 }
 
-// Last.fm으로 연결한 친구의 지금 듣는 곡을 수집과 상관없이 바로 바꿉니다.
+// 지금 듣는 곡은 수집과 상관없이 바로 바꿉니다.
 async function pollLive() {
   const tokens = Object.entries(state.snapshot?.liveTokens ?? {});
   if (document.hidden || !state.connect || !tokens.length) return;

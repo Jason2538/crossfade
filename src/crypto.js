@@ -18,12 +18,12 @@ const TAG_BYTES = 16;
 
 const deriveKey = (passphrase, salt) => pbkdf2Sync(passphrase, salt, ITERATIONS, 32, 'sha256');
 
-// Worker만 풀 수 있는 Last.fm 이름입니다. 공개 그룹의 스냅샷에도 이름이 드러나지 않습니다.
+// Worker만 풀 수 있는 Last.fm 이름이나 Spotify 토큰입니다. 공개 그룹의 스냅샷에도 드러나지 않습니다.
 // 형식: iv | 암호문 | 인증 태그
-export function sealLiveToken(user, hexKey) {
+export function sealLiveToken(target, hexKey) {
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv('aes-256-gcm', Buffer.from(hexKey, 'hex'), iv);
-  return Buffer.concat([iv, cipher.update(user), cipher.final(), cipher.getAuthTag()]).toString('base64url');
+  return Buffer.concat([iv, cipher.update(target), cipher.final(), cipher.getAuthTag()]).toString('base64url');
 }
 
 // 형식: salt | iv | 암호문 | 인증 태그

@@ -10,6 +10,7 @@ import {
   findSpotifyAccount,
   getGroupByCode,
   getMember,
+  getSpotifyAccount,
   listGroups,
   listMembers,
   listNotices,
@@ -32,15 +33,22 @@ export const MAX_GROUPS = 20;
 const NOTICE_SECONDS = 7 * 86400;
 const DEFAULT_GROUP_ID = 1;
 
+// refresh token은 Cloudflare에 보내지 않습니다. 1시간 뒤 끝나는 access token만 넘깁니다.
+function liveTarget(db, member) {
+  if (!member.lastfm_user.startsWith('spotify:')) return member.lastfm_user;
+  const account = getSpotifyAccount(db, member.id);
+  return account ? `spotify:${account.access_token}` : null;
+}
+
 // GitHub Pages에는 서버가 없으므로, 화면에 필요한 값을 그룹별로 미리 계산해 초대 코드로 암호화해 둡니다.
 export function buildSnapshot(db, groupId, { now, tzOffsetMinutes, liveKey = null }) {
   const weeks = Array.from({ length: MAX_WEEKS_BACK + 1 }, (_, week) => week);
-  const lastfmMembers = listMembers(db, groupId).filter((member) => !member.lastfm_user.startsWith('spotify:'));
+  const targets = listMembers(db, groupId)
+    .map((member) => [member.id, liveTarget(db, member)])
+    .filter(([, target]) => target);
   return {
     generatedAt: now,
-    liveTokens: liveKey
-      ? Object.fromEntries(lastfmMembers.map((member) => [member.id, sealLiveToken(member.lastfm_user, liveKey)]))
-      : {},
+    liveTokens: liveKey ? Object.fromEntries(targets.map(([id, target]) => [id, sealLiveToken(target, liveKey)])) : {},
     notices: listNotices(db, groupId, now - NOTICE_SECONDS),
     overview: weeks.map((week) => buildOverview(db, { week, now, tzOffsetMinutes, groupId })),
     members: Object.fromEntries(

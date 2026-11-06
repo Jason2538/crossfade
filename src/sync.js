@@ -17,7 +17,8 @@ const MAX_PAGES = 50;
 const LOOP_MS = 60_000;
 const DURATION_BATCH = 100;
 const REQUEST_GAP_MS = 220;
-const TOKEN_MARGIN_SECONDS = 60;
+// 사이트가 다음 수집 때까지 같은 토큰으로 지금 듣는 곡을 읽으므로 넉넉히 남겨 둡니다.
+const TOKEN_MARGIN_SECONDS = 35 * 60;
 
 // 아이폰 스크로블 앱은 기록을 모아서 늦게 올리기도 합니다.
 // 최신 기록 이후만 받으면 이런 곡을 놓치므로 하루를 겹쳐서 받습니다.

@@ -110,7 +110,30 @@ async function fetchLive(user, env) {
   };
 }
 
-// 보는 사람이 많아도 Last.fm에는 25초에 한 번만 묻습니다.
+function spotifyTrack(item) {
+  return {
+    artist: item.artists?.[0]?.name ?? '',
+    track: item.name ?? '',
+    album: item.album?.name ?? '',
+    image: item.album?.images?.[1]?.url ?? item.album?.images?.[0]?.url ?? '',
+  };
+}
+
+// 토큰이 끝났으면 null 을 돌려주고, 사이트는 수집한 값을 그대로 보여 줍니다.
+async function fetchSpotifyLive(token) {
+  const api = (path) => fetch(`https://api.spotify.com/v1${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const [current, recent] = await Promise.all([api('/me/player/currently-playing'), api('/me/player/recently-played?limit=1')]);
+  if (!current.ok || !recent.ok) return null;
+  const playing = current.status === 204 ? null : await current.json();
+  const last = (await recent.json()).items?.[0];
+  return {
+    // 팟캐스트나 일시정지 상태는 재생 중인 곡으로 보지 않습니다.
+    nowPlaying: playing?.is_playing && playing.item?.type === 'track' ? spotifyTrack(playing.item) : null,
+    lastPlayed: last ? { ...spotifyTrack(last.track ?? {}), played_at: Math.floor(Date.parse(last.played_at) / 1000) } : null,
+  };
+}
+
+// 보는 사람이 많아도 Last.fm과 Spotify에는 25초에 한 번만 묻습니다.
 async function liveResponse(request, env, url, cors) {
   if (request.headers.get('Origin') !== env.ALLOWED_ORIGIN) return json({ error: 'forbidden' }, 403, cors);
   if (!env.LIVE_KEY || !env.LASTFM_API_KEY) return json({ error: 'not configured' }, 503, cors);
@@ -118,14 +141,15 @@ async function liveResponse(request, env, url, cors) {
   const cached = await cache?.match(url.href);
   if (cached) return cached;
 
-  let user;
+  let target;
   try {
-    user = await openLiveToken(url.searchParams.get('t') ?? '', env);
+    target = await openLiveToken(url.searchParams.get('t') ?? '', env);
   } catch {
     return json({ error: 'bad token' }, 400, cors);
   }
-  const live = await fetchLive(user, env).catch(() => null);
-  if (!live) return json({ error: 'lastfm failed' }, 502, cors);
+  const reading = target.startsWith('spotify:') ? fetchSpotifyLive(target.slice('spotify:'.length)) : fetchLive(target, env);
+  const live = await reading.catch(() => null);
+  if (!live) return json({ error: 'upstream failed' }, 502, cors);
   const response = json(live, 200, { ...cors, 'Cache-Control': `max-age=${LIVE_CACHE_SECONDS}` });
   await cache?.put(url.href, response.clone());
   return response;
