@@ -108,6 +108,56 @@ test('같은 주소의 요청이 너무 많으면 막는다', async () => {
   assert.equal([...env.store.keys()].some((key) => key.includes('unknown')), false, '주소를 그대로 저장하지 않는다');
 });
 
+test('요청이 들어오면 수집을 시작하되 1분에 한 번만 시작한다', async () => {
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(null, { status: 204 });
+  };
+  const env = { ...fakeEnv(), GITHUB_TOKEN: 'gh-token', GITHUB_REPO: 'owner/repo' };
+  const body = JSON.stringify({ sealed: await seal({ kind: 'group', code: 'x' }) });
+  await call(env, '/queue', { method: 'POST', origin: ORIGIN, body });
+  await call(env, '/queue', { method: 'POST', origin: ORIGIN, body });
+  globalThis.fetch = realFetch;
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://api.github.com/repos/owner/repo/actions/workflows/collect.yml/dispatches');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer gh-token');
+  assert.equal(calls[0].options.body, '{"ref":"main"}');
+});
+
+test('수집 시작에 실패해도 요청은 대기열에 남는다', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error('network down');
+  };
+  const realError = console.error;
+  console.error = () => {};
+  const env = { ...fakeEnv(), GITHUB_TOKEN: 'gh-token', GITHUB_REPO: 'owner/repo' };
+  const body = JSON.stringify({ sealed: await seal({ kind: 'group', code: 'x' }) });
+  const response = await call(env, '/queue', { method: 'POST', origin: ORIGIN, body });
+  globalThis.fetch = realFetch;
+  console.error = realError;
+
+  assert.equal(response.status, 200);
+  assert.equal([...env.store.keys()].some((key) => key.startsWith('item:')), true);
+});
+
+test('정해진 시각마다 수집을 시작한다', async () => {
+  const realFetch = globalThis.fetch;
+  let called = 0;
+  globalThis.fetch = async () => {
+    called += 1;
+    return new Response(null, { status: 204 });
+  };
+  const pending = [];
+  worker.scheduled({}, { ...fakeEnv(), GITHUB_TOKEN: 'gh-token', GITHUB_REPO: 'owner/repo' }, { waitUntil: (p) => pending.push(p) });
+  await Promise.all(pending);
+  globalThis.fetch = realFetch;
+  assert.equal(called, 1);
+});
+
 test('새 그룹은 한 번만 만들어지고 개수가 제한된다', async () => {
   const db = openDb(':memory:');
   const request = { kind: 'group', code: CODE };

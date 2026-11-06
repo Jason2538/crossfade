@@ -2,8 +2,8 @@ name: collect
 
 on:
   schedule:
-    # 매시 정각은 GitHub가 붐벼서 지연이 잦습니다.
-    - cron: '3,18,33,48 * * * *'
+    # 평소에는 relay/worker.js 가 15분마다 시작합니다. 이 예약은 Worker가 멈췄을 때를 위한 예비입니다.
+    - cron: '33 * * * *'
   workflow_dispatch:
     inputs:
       action:

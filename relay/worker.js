@@ -6,6 +6,8 @@ const TTL_SECONDS = 3 * 86400;
 const DAILY_LIMIT = 30;
 const ITEM_PREFIX = 'item:';
 const RATE_PREFIX = 'rate:';
+const DISPATCH_KEY = 'dispatch';
+const DISPATCH_GAP_SECONDS = 60;
 
 const json = (body, status, headers) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
@@ -24,7 +26,39 @@ async function isOverLimit(request, env) {
   return false;
 }
 
+// GitHub의 schedule 은 제때 돌지 않을 때가 많아서 여기서 수집을 시작합니다.
+async function startCollection(env) {
+  if (!env.GITHUB_TOKEN) return;
+  try {
+    const response = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/collect.yml/dispatches`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'crossfade-relay',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: JSON.stringify({ ref: 'main' }),
+    });
+    if (!response.ok) console.error('수집 시작 실패:', response.status);
+  } catch (error) {
+    console.error('수집 시작 실패:', error.message);
+  }
+}
+
+// 요청이 몰려도 수집은 1분에 한 번만 시작합니다.
+async function startCollectionSoon(env) {
+  if (await env.LOGINS.get(DISPATCH_KEY)) return;
+  await env.LOGINS.put(DISPATCH_KEY, '1', { expirationTtl: DISPATCH_GAP_SECONDS });
+  await startCollection(env);
+}
+
 export default {
+  scheduled(_event, env, ctx) {
+    ctx.waitUntil(startCollection(env));
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     const cors = {
@@ -49,6 +83,7 @@ export default {
       if (!sealed?.key || !sealed?.iv || !sealed?.data) return json({ error: 'bad request' }, 400, cors);
       if (await isOverLimit(request, env)) return json({ error: 'too many requests' }, 429, cors);
       await env.LOGINS.put(`${ITEM_PREFIX}${crypto.randomUUID()}`, JSON.stringify(sealed), { expirationTtl: TTL_SECONDS });
+      await startCollectionSoon(env);
       return json({ queued: true }, 200, cors);
     }
 

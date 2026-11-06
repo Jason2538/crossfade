@@ -4,6 +4,10 @@ compatibility_date = "2026-10-01"
 
 [vars]
 ALLOWED_ORIGIN = "https://jason2538.github.io"
+GITHUB_REPO = "Jason2538/crossfade"
+
+[triggers]
+crons = ["*/15 * * * *"]
 
 [[kv_namespaces]]
 binding = "LOGINS"
