@@ -15,6 +15,7 @@ import {
   listMembers,
   listNotices,
   openDb,
+  saveDefaultGroup,
 } from '../src/db.js';
 
 const NOW = 1_800_000_000;
@@ -215,6 +216,39 @@ test('공개 그룹의 멤버는 코드로 뺄 수 없다', async () => {
   const relay = await queueOf({ kind: 'remove', code: CODE, memberId });
   assert.deepEqual(await processQueue(db, fakeClient, relay, privateKey, NOW, { openCode: CODE }), ['0']);
   assert.equal(listMembers(db).length, 1);
+});
+
+test('관리자는 비밀번호가 맞을 때만 멤버와 그룹을 지운다', async () => {
+  const db = groupDb();
+  const [first] = listGroups(db);
+  const other = addGroup(db, 'other-code', NOW);
+  const memberId = addMember(db, { name: '친구', lastfmUser: 'buddy', service: 'apple', joinedAt: NOW, groupId: first.id });
+  const otherMember = addMember(db, { name: '남', lastfmUser: 'stranger', service: 'apple', joinedAt: NOW, groupId: other });
+  const options = { adminPassword: 'right-password', openCode: CODE };
+  const realError = console.error;
+  console.error = () => {};
+
+  const wrong = { kind: 'admin', password: 'wrong', action: 'removeMember', memberId };
+  await processQueue(db, fakeClient, await queueOf(wrong), privateKey, NOW, options);
+  await processQueue(db, fakeClient, await queueOf({ ...wrong, password: 'right-password' }), privateKey, NOW, { openCode: CODE });
+  console.error = realError;
+  assert.equal(listMembers(db).length, 2, '비밀번호가 틀리거나 설정되지 않으면 지우지 않는다');
+
+  const admin = { kind: 'admin', password: 'right-password' };
+  await processQueue(db, fakeClient, await queueOf({ ...admin, action: 'removeMember', memberId }), privateKey, NOW, options);
+  assert.deepEqual(listMembers(db).map((m) => m.id), [otherMember], '공개 그룹의 멤버도 관리자는 뺄 수 있다');
+
+  await processQueue(db, fakeClient, await queueOf({ ...admin, action: 'removeGroup', groupId: other }), privateKey, NOW, options);
+  assert.equal(listMembers(db).length, 0);
+  assert.deepEqual(listGroups(db).map((g) => g.id), [first.id]);
+});
+
+test('기본 그룹은 관리자도 지울 수 없다', async () => {
+  const db = openDb(':memory:');
+  saveDefaultGroup(db, CODE, NOW);
+  const request = { kind: 'admin', password: 'pw', action: 'removeGroup', groupId: 1 };
+  await processQueue(db, fakeClient, await queueOf(request), privateKey, NOW, { adminPassword: 'pw' });
+  assert.equal(listGroups(db).length, 1);
 });
 
 test('같은 친구가 여러 그룹에 들어갈 수 있다', async () => {

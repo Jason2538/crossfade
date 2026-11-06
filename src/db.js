@@ -122,6 +122,12 @@ export function saveDefaultGroup(db, code, createdAt) {
   ).run(code, createdAt);
 }
 
+export function removeGroup(db, groupId) {
+  db.prepare('DELETE FROM members WHERE group_id = ?').run(groupId);
+  db.prepare('DELETE FROM group_notices WHERE group_id = ?').run(groupId);
+  return db.prepare('DELETE FROM groups WHERE id = ?').run(groupId).changes > 0;
+}
+
 export function addNotice(db, groupId, message, createdAt) {
   db.prepare('INSERT INTO group_notices (group_id, message, created_at) VALUES (?, ?, ?)').run(groupId, message, createdAt);
 }

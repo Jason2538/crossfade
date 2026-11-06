@@ -2,10 +2,11 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig, loadEnvFile, ROOT } from './config.js';
-import { groupFileId, openBytes, openForCollector, publicKeyJwk, sealBytes } from './crypto.js';
+import { groupFileId, openBytes, openForCollector, publicKeyJwk, samePassword, sealBytes } from './crypto.js';
 import {
   addGroup,
   addNotice,
+  countSpotifyAccounts,
   findSpotifyAccount,
   getGroupByCode,
   getMember,
@@ -14,6 +15,7 @@ import {
   listNotices,
   moveMember,
   openDb,
+  removeGroup,
   removeMember,
   saveDefaultGroup,
 } from './db.js';
@@ -92,13 +94,26 @@ const HANDLERS = {
   },
 };
 
+// 관리자 화면의 요청입니다. 비밀번호가 맞을 때만 처리합니다.
+function handleAdmin(db, request, adminPassword) {
+  if (!adminPassword || !samePassword(request.password, adminPassword)) throw new Error('관리자 비밀번호가 맞지 않습니다.');
+  if (request.action === 'removeMember') removeMember(db, request.memberId);
+  // 1번 그룹은 사이트의 기본 그룹이라 지우지 않습니다.
+  if (request.action === 'removeGroup' && request.groupId !== DEFAULT_GROUP_ID) removeGroup(db, request.groupId);
+}
+
 // 중계 대기열의 요청을 처리합니다. 초대 코드를 아는 사람만 그 그룹을 바꿀 수 있습니다. 처리한 항목의 id를 돌려줍니다.
 // 코드가 공개된 그룹은 누구나 요청할 수 있으므로 멤버 삭제를 받지 않습니다.
-export async function processQueue(db, client, relay, privateKeyPem, now, { openCode = null } = {}) {
+export async function processQueue(db, client, relay, privateKeyPem, now, { openCode = null, adminPassword = null } = {}) {
   const done = [];
   for (const { id, sealed } of await relay.list()) {
     try {
       const request = openForCollector(sealed, privateKeyPem);
+      if (request.kind === 'admin') {
+        handleAdmin(db, request, adminPassword);
+        done.push(id);
+        continue;
+      }
       const handler = Object.hasOwn(HANDLERS, request.kind) ? HANDLERS[request.kind] : null;
       const group = getGroupByCode(db, request.code);
       if (request.kind === 'remove' && request.code === openCode) throw new Error('공개 그룹의 멤버는 뺄 수 없습니다.');
@@ -109,6 +124,24 @@ export async function processQueue(db, client, relay, privateKeyPem, now, { open
     done.push(id);
   }
   return done;
+}
+
+// 초대 코드는 넣지 않습니다. 관리자도 그룹의 초대 코드 없이 멤버 목록만 봅니다.
+function adminGroup(group, snapshot) {
+  return {
+    id: group.id,
+    createdAt: group.created_at,
+    isDefault: group.id === DEFAULT_GROUP_ID,
+    members: snapshot.overview[0].members.map(({ id, name, service, minutes, plays, lastSyncedAt, error }) => ({
+      id,
+      name,
+      service,
+      minutes,
+      plays,
+      lastSyncedAt,
+      error,
+    })),
+  };
 }
 
 export async function collect({
@@ -124,6 +157,7 @@ export async function collect({
   tokenPrivateKey = null,
   connect = null,
   openAccess = false,
+  adminPassword = null,
 }) {
   // 복호화에 실패하면 여기서 멈춥니다. 빈 DB로 계속하면 쌓인 기록을 덮어쓰게 됩니다.
   if (existsSync(archivePath)) {
@@ -138,7 +172,7 @@ export async function collect({
   let processed = [];
   if (relay) {
     try {
-      processed = await processQueue(db, client, relay, tokenPrivateKey, nowSeconds(), { openCode });
+      processed = await processQueue(db, client, relay, tokenPrivateKey, nowSeconds(), { openCode, adminPassword });
     } catch (error) {
       console.error('중계 서버 연결 실패:', error.message);
     }
@@ -157,9 +191,15 @@ export async function collect({
   writeFileSync(join(outputDir, 'site.json'), JSON.stringify({ connect, openCode }));
 
   const now = nowSeconds();
+  const adminGroups = [];
   for (const group of listGroups(db)) {
     const snapshot = buildSnapshot(db, group.id, { now, tzOffsetMinutes: config.tzOffsetMinutes });
     writeFileSync(join(outputDir, 'groups', `${groupFileId(group.code)}.enc`), sealBytes(JSON.stringify(snapshot), group.code));
+    adminGroups.push(adminGroup(group, snapshot));
+  }
+  if (adminPassword) {
+    const summary = { generatedAt: now, maxGroups: MAX_GROUPS, spotifyUsers: countSpotifyAccounts(db), groups: adminGroups };
+    writeFileSync(join(outputDir, 'admin.enc'), sealBytes(JSON.stringify(summary), adminPassword));
   }
 
   db.close();
@@ -201,6 +241,7 @@ async function main() {
     config,
     dbKey,
     openAccess: process.env.OPEN_ACCESS === '1',
+    adminPassword: (process.env.ADMIN_PASSWORD ?? '').trim() || null,
     archivePath: process.env.DB_ARCHIVE || join(ROOT, 'crossfade.db.enc'),
     outputDir: join(ROOT, 'site'),
     client: createClient({ apiKey: config.apiKey, baseUrl: config.lastfmBaseUrl }),

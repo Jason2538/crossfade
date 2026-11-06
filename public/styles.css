@@ -984,6 +984,65 @@ fieldset.field {
   gap: 8px;
 }
 
+.footer-links {
+  display: flex;
+  gap: 16px;
+}
+
+.admin-group {
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.admin-group-head,
+.admin-member {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-group-head h2 {
+  font-size: 17px;
+}
+
+.admin-group-head span span,
+.admin-name span,
+.admin-empty,
+.admin-requested {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.admin-members {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-member {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.admin-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.admin-requested {
+  flex-shrink: 0;
+}
+
+.admin-group .btn {
+  flex-shrink: 0;
+}
+
+.admin-empty {
+  margin-top: 10px;
+}
+
 .gate-card .btn + .btn {
   margin-top: 8px;
 }

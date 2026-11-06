@@ -61,6 +61,7 @@ jobs:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           INVITE_CODE: ${{ secrets.INVITE_CODE }}
           DB_KEY: ${{ secrets.DB_KEY }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
           RELAY_URL: ${{ vars.RELAY_URL }}
           OPEN_ACCESS: ${{ vars.OPEN_ACCESS }}

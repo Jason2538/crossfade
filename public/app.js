@@ -38,6 +38,7 @@ const state = {
   connect: null,
   openCode: null,
   pendingCode: null,
+  admin: null,
   spotifyCallback: takeSpotifyCallback(),
 };
 
@@ -637,7 +638,12 @@ async function renderHome() {
       fader(members),
       members.length ? [nowPlayingSection(members), rankingSection(data), tasteSection(data)] : emptyHome(),
       state.session.static
-        ? el('p', { class: 'footnote' }, el('button', { class: 'link-button', type: 'button', onclick: leaveGroup }, '다른 그룹으로 이동'))
+        ? el(
+            'p',
+            { class: 'footnote footer-links' },
+            el('button', { class: 'link-button', type: 'button', onclick: leaveGroup }, '다른 그룹으로 이동'),
+            el('a', { class: 'link-button', href: '#/admin' }, '관리자'),
+          )
         : null,
     ),
   );
@@ -816,6 +822,144 @@ async function renderMember(id) {
               '그룹에서 빼기',
             ),
           ),
+    ),
+  );
+}
+
+function renderAdminLogin() {
+  const error = el('p', { class: 'form-error', role: 'alert' });
+  const input = el('input', { type: 'password', name: 'password', autocomplete: 'off', required: true });
+  app.replaceChildren(
+    el(
+      'main',
+      { class: 'gate' },
+      el(
+        'form',
+        {
+          class: 'card gate-card',
+          onsubmit: async (event) => {
+            event.preventDefault();
+            error.textContent = '';
+            const password = input.value.trim();
+            const response = await fetch(`admin.enc?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null);
+            if (!response?.ok) {
+              error.textContent = '관리자 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
+              return;
+            }
+            try {
+              const summary = await openSnapshot(new Uint8Array(await response.arrayBuffer()), password);
+              state.admin = { password, summary, requested: new Set() };
+              renderAdmin();
+            } catch {
+              error.textContent = '비밀번호가 맞지 않아요.';
+            }
+          },
+        },
+        el('img', { src: 'favicon.svg', alt: '', width: '36', height: '36' }),
+        el('h1', {}, '관리자'),
+        el('p', {}, '관리자 비밀번호를 입력해 주세요.'),
+        el('label', { class: 'field' }, el('span', {}, '비밀번호'), input),
+        error,
+        el('button', { class: 'btn primary', type: 'submit' }, '들어가기'),
+        el('a', { class: 'link-button', href: '#/' }, '사이트로 돌아가기'),
+      ),
+    ),
+  );
+  input.focus();
+}
+
+function adminButton(key, label, question, request) {
+  const { admin } = state;
+  if (admin.requested.has(key)) return el('span', { class: 'admin-requested' }, '삭제 요청됨');
+  return el(
+    'button',
+    {
+      class: 'btn danger',
+      type: 'button',
+      onclick: async (event) => {
+        if (!confirm(question)) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          await sendToCollector(state.connect, { kind: 'admin', password: admin.password, ...request });
+          admin.requested.add(key);
+          renderAdmin();
+        } catch (failure) {
+          button.disabled = false;
+          alert(failure.message);
+        }
+      },
+    },
+    label,
+  );
+}
+
+function adminMemberRow(member) {
+  return el(
+    'li',
+    { class: 'admin-member' },
+    el(
+      'span',
+      { class: 'admin-name' },
+      el('b', {}, member.name),
+      el('span', {}, `${SERVICE_NAMES[member.service]} · 이번 주 ${number(member.minutes)}분 · ${number(member.plays)}회`),
+      member.error ? el('span', { class: 'warn-line' }, `⚠ ${member.error}`) : null,
+    ),
+    adminButton(`member:${member.id}`, '빼기', `${member.name} 님을 빼고 저장된 기록도 삭제할까요?`, {
+      action: 'removeMember',
+      memberId: member.id,
+    }),
+  );
+}
+
+function adminGroupCard(group) {
+  const title = group.isDefault ? '기본 그룹' : `그룹 ${group.id}`;
+  const created = new Date(group.createdAt * 1000).toLocaleDateString('ko-KR');
+  return el(
+    'section',
+    { class: 'card admin-group' },
+    el(
+      'div',
+      { class: 'admin-group-head' },
+      el('span', {}, el('h2', {}, title), el('span', {}, `${created} 생성 · ${group.members.length}명`)),
+      group.isDefault
+        ? null
+        : adminButton(`group:${group.id}`, '그룹 삭제', `${title}과 멤버의 기록을 모두 삭제할까요? 되돌릴 수 없어요.`, {
+            action: 'removeGroup',
+            groupId: group.id,
+          }),
+    ),
+    group.members.length
+      ? el('ul', { class: 'admin-members' }, group.members.map(adminMemberRow))
+      : el('p', { class: 'admin-empty' }, '아직 멤버가 없어요.'),
+  );
+}
+
+function renderAdmin() {
+  if (!state.admin) return renderAdminLogin();
+  const { summary } = state.admin;
+  app.replaceChildren(
+    el(
+      'main',
+      { class: 'shell' },
+      el('a', { class: 'back', href: '#/' }, '‹ 사이트로 돌아가기'),
+      el('div', { class: 'detail-head' }, el('div', {}, el('h1', {}, '관리자'))),
+      el(
+        'p',
+        { class: 'notice' },
+        el('strong', {}, `${timeAgo(summary.generatedAt)} 기준 현황이에요. `),
+        '삭제는 다음 수집 때 반영돼요.',
+      ),
+      el(
+        'div',
+        { class: 'stat-row' },
+        [
+          [`${summary.groups.length}/${summary.maxGroups}`, '그룹'],
+          [number(summary.groups.reduce((total, group) => total + group.members.length, 0)), '멤버'],
+          [`${summary.spotifyUsers}/5`, 'Spotify 로그인'],
+        ].map(([value, label]) => el('div', { class: 'card stat' }, el('b', {}, value), el('span', {}, label))),
+      ),
+      summary.groups.map(adminGroupCard),
     ),
   );
 }
@@ -1061,6 +1205,7 @@ async function render() {
   }
   try {
     if (!state.session) state.session = await loadSession();
+    if (state.session.static && location.hash === '#/admin') return renderAdmin();
     await refreshSnapshot();
     if (!state.session.authed) {
       if (!state.pendingCode) return renderGate();

@@ -105,6 +105,33 @@ test('공개 설정일 때만 site.json 에 코드를 넣는다', async () => {
   assert.equal(JSON.parse(readFileSync(join(base.outputDir, 'site.json'))).openCode, 'invite');
 });
 
+test('관리자 현황은 비밀번호로 암호화되고 초대 코드를 담지 않는다', async () => {
+  const base = {
+    config: { tzOffsetMinutes: KST, inviteCode: 'invite-secret-code', dbPath: join(dir, 'admin.db') },
+    dbKey: 'db-key',
+    archivePath: join(dir, 'admin.enc'),
+    outputDir: join(dir, 'admin-site'),
+    client: fakeClient(),
+    gapMs: 0,
+  };
+  await collect(base);
+  assert.equal(existsSync(join(base.outputDir, 'admin.enc')), false, '비밀번호가 없으면 만들지 않는다');
+
+  await collect({
+    ...base,
+    adminPassword: 'admin-pw',
+    change: { action: 'add', name: '친구', lastfmUser: 'friend', service: 'apple' },
+  });
+  const sealed = readFileSync(join(base.outputDir, 'admin.enc'));
+  assert.equal(sealed.includes('friend'), false);
+  await assert.rejects(openSnapshot(new Uint8Array(sealed), 'wrong'));
+
+  const summary = await openSnapshot(new Uint8Array(sealed), 'admin-pw');
+  assert.equal(summary.groups[0].isDefault, true);
+  assert.equal(summary.groups[0].members[0].name, '친구');
+  assert.equal(JSON.stringify(summary).includes('invite-secret-code'), false);
+});
+
 test('DB를 풀 수 없으면 기록을 덮어쓰지 않고 멈춘다', async () => {
   const archivePath = join(dir, 'broken.enc');
   writeFileSync(archivePath, sealBytes('db', 'other-key'));

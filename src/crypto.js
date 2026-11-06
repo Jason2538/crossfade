@@ -7,6 +7,7 @@ import {
   pbkdf2Sync,
   privateDecrypt,
   randomBytes,
+  timingSafeEqual,
 } from 'node:crypto';
 
 // public/snapshot.js 가 브라우저에서 같은 형식을 풉니다. 값을 바꾸면 두 곳을 함께 바꿔야 합니다.
@@ -35,6 +36,11 @@ export function openBytes(sealed, passphrase) {
 
 // public/snapshot.js 의 groupFileId 와 같은 값을 만듭니다.
 export const groupFileId = (code) => createHash('sha256').update(`crossfade-group-v1:${code}`).digest('hex').slice(0, 32);
+
+export function samePassword(a, b) {
+  const digest = (value) => createHash('sha256').update(String(value)).digest();
+  return timingSafeEqual(digest(a), digest(b));
+}
 
 export const publicKeyJwk = (privateKeyPem) => createPublicKey(privateKeyPem).export({ format: 'jwk' });
 
