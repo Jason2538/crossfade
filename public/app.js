@@ -7,7 +7,7 @@ const SNAPSHOT_REFRESH_MS = 5 * 60_000;
 const COUNT_UP_MS = 900;
 const REFRESH_SPIN_MS = 500;
 const COLLECT_WATCH_MS = 15_000;
-const COLLECT_WATCH_TRIES = 20;
+const COLLECT_WATCH_TRIES = 40;
 // 수집이 이보다 오래 멈췄다면 "지금 듣는 중"은 더 이상 지금이 아닙니다.
 const NOW_PLAYING_TTL_SECONDS = 30 * 60;
 const CODE_STORAGE_KEY = 'crossfade.inviteCode';
@@ -415,7 +415,7 @@ function header() {
 
 function demoNotice() {
   if (state.flash) return el('p', { class: 'notice', role: 'status' }, state.flash);
-  if (state.collecting) return el('p', { class: 'notice', role: 'status' }, '새 기록을 모으는 중이에요. 2~3분 뒤 자동으로 바뀌어요.');
+  if (state.collecting) return el('p', { class: 'notice', role: 'status' }, '새 기록을 모으는 중이에요. 몇 분 뒤 자동으로 바뀌어요.');
   if (state.snapshot) {
     return [
       el(
