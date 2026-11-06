@@ -46,7 +46,7 @@ Spotify 친구는 Last.fm 없이 Spotify 계정으로 바로 연결할 수도 �
 
 ## GitHub Pages로 배포
 
-서버 없이 `.github/workflows/collect.yml` 이 15분쯤마다 기록을 모아 정적 사이트를 다시 올립니다. GitHub 예약은 늦어지거나 빠질 수 있습니다. 더 빠르게 하려면 Worker에 이 저장소의 Actions 쓰기 권한만 가진 `GITHUB_TOKEN` 비밀값을 넣으세요. 15분마다, 사이트에서 요청이 들어올 때, 그리고 새로고침 버튼을 누를 때(3분에 한 번) Worker가 워크플로를 시작합니다.
+서버 없이 `.github/workflows/collect.yml` 이 15분쯤마다 기록을 모아 정적 사이트를 다시 올립니다. GitHub 예약은 늦어지거나 빠질 수 있습니다. 더 빠르게 하려면 Worker에 이 저장소의 Actions 쓰기 권한만 가진 `GITHUB_TOKEN` 비밀값을 넣으세요. 15분마다, 사이트에서 요청이 들어올 때, 그리고 새로고침 버튼을 누를 때(6분에 한 번) Worker가 워크플로를 시작합니다.
 
 - 공개 저장소에서 동작합니다. 청취 기록은 그룹별로 `site/groups/` 에 초대 코드로, 누적 DB는 `data` 브랜치에 `DB_KEY` 로 암호화해 저장합니다.
 - 저장소 Secrets에 `LASTFM_API_KEY`, `INVITE_CODE`, `DB_KEY` 를 넣고, Pages의 Source를 GitHub Actions로 설정합니다.

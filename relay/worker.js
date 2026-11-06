@@ -9,7 +9,7 @@ const RATE_PREFIX = 'rate:';
 const DISPATCH_KEY = 'dispatch';
 const DISPATCH_GAP_SECONDS = 60;
 const COLLECT_KEY = 'collect';
-const COLLECT_GAP_SECONDS = 180;
+const COLLECT_GAP_SECONDS = 360;
 
 const json = (body, status, headers) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
@@ -58,7 +58,7 @@ async function startCollectionSoon(env) {
   await startCollection(env);
 }
 
-// 새로고침 버튼용입니다. 여러 명이 눌러도 3분에 한 번만 시작하고, 진행 중이면 그 수집을 기다리게 합니다.
+// 새로고침 버튼용입니다. 사이트 반영에 5분쯤 걸려서 겹치면 배포가 실패합니다. 여러 명이 눌러도 6분에 한 번만 시작하고, 진행 중이면 그 수집을 기다리게 합니다.
 async function collectNow(request, env) {
   if (!env.GITHUB_TOKEN) return { started: false };
   if (await env.LOGINS.get(COLLECT_KEY)) return { started: true };

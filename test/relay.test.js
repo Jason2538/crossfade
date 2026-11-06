@@ -138,7 +138,7 @@ test('요청이 들어오면 수집을 시작하되 1분에 한 번만 시작한
   assert.equal(calls[0].options.body, '{"ref":"main"}');
 });
 
-test('새로고침 버튼은 사이트에서만 수집을 시작하고 3분에 한 번만 시작한다', async () => {
+test('새로고침 버튼은 사이트에서만 수집을 시작하고 6분에 한 번만 시작한다', async () => {
   const realFetch = globalThis.fetch;
   let called = 0;
   globalThis.fetch = async () => {
