@@ -1137,6 +1137,39 @@ dialog h2 {
   pointer-events: none;
 }
 
+@media (max-width: 480px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .topbar-actions {
+    gap: 6px;
+  }
+
+  .topbar .btn {
+    padding: 8px 10px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .topbar .btn.icon {
+    padding: 0;
+    font-size: 18px;
+  }
+
+  .brand {
+    gap: 6px;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+
+  .brand img {
+    width: 22px;
+    height: 22px;
+  }
+}
+
 @media (max-width: 760px) {
   .shell {
     padding: 14px 16px 48px;
