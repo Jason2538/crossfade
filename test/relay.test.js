@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { finishSpotifyLogin, sealForCollector, startSpotifyLogin, takeSpotifyCallback } from '../public/spotify-login.js';
 import worker from '../relay/worker.js';
 import { MAX_GROUPS, processQueue } from '../src/collect.js';
-import { openForCollector, publicKeyJwk } from '../src/crypto.js';
+import { openForCollector, publicKeyJwk, sealLiveToken } from '../src/crypto.js';
 import {
   addGroup,
   addMember,
@@ -172,6 +172,39 @@ test('토큰이 없거나 수집을 시작하지 못하면 버튼에 알린다',
 
   assert.deepEqual(await response.json(), { started: false });
   assert.equal(env.store.has('collect'), false);
+});
+
+test('지금 듣는 곡은 사이트에서만, 암호화된 토큰으로만 Last.fm에서 바로 읽는다', async () => {
+  const LIVE_KEY = 'ab'.repeat(32);
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (url) => {
+    asked.push(new URL(url).searchParams.get('user'));
+    return Response.json({
+      recenttracks: {
+        track: [
+          { name: 'Now', artist: { '#text': 'A' }, album: { '#text': 'B' }, image: [], '@attr': { nowplaying: 'true' } },
+          { name: 'Before', artist: { '#text': 'C' }, image: [], date: { uts: '1000' } },
+        ],
+      },
+    });
+  };
+  const env = { ...fakeEnv(), LIVE_KEY, LASTFM_API_KEY: 'key' };
+  const token = sealLiveToken('secret-user', LIVE_KEY);
+  const get = (t, origin = ORIGIN) => call(env, `/now?t=${encodeURIComponent(t)}`, { origin });
+
+  assert.equal((await get(token, 'https://evil.example')).status, 403);
+  assert.equal((await get('not-a-token')).status, 400);
+  assert.equal((await get(sealLiveToken('other', 'cd'.repeat(32)))).status, 400);
+  const raw = await (await get(token)).text();
+  globalThis.fetch = realFetch;
+
+  assert.deepEqual(asked, ['secret-user']);
+  assert.equal(raw.includes('secret-user'), false);
+  const body = JSON.parse(raw);
+  assert.equal(body.nowPlaying.track, 'Now');
+  assert.equal(body.lastPlayed.track, 'Before');
+  assert.equal(body.lastPlayed.played_at, 1000);
 });
 
 test('수집 시작에 실패해도 요청은 대기열에 남는다', async () => {

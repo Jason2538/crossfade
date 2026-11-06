@@ -44,6 +44,7 @@ test('스냅샷에 8주치 화면 데이터가 들어가고 토큰은 나가지 
   saveSpotifyAccount(db, { memberId: id, spotifyId: 's', accessToken: 'token-a', refreshToken: 'token-r', expiresAt: 0 });
 
   const snapshot = buildSnapshot(db, 1, { now: NOW, tzOffsetMinutes: KST });
+  assert.deepEqual(snapshot.liveTokens, {});
   assert.equal(snapshot.overview.length, 8);
   assert.equal(snapshot.members[id].length, 8);
   assert.equal(snapshot.overview[0].group.plays, 1);

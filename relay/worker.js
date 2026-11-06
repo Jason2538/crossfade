@@ -8,6 +8,8 @@ const ITEM_PREFIX = 'item:';
 const RATE_PREFIX = 'rate:';
 const DISPATCH_KEY = 'dispatch';
 const DISPATCH_GAP_SECONDS = 60;
+const LIVE_CACHE_SECONDS = 25;
+const LASTFM_PLACEHOLDER_IMAGE = '2a96cbd8b46e442fc41c2b86b821562f';
 const COLLECT_KEY = 'collect';
 const COLLECT_GAP_SECONDS = 360;
 
@@ -69,6 +71,66 @@ async function collectNow(request, env) {
   return { started };
 }
 
+async function openLiveToken(token, env) {
+  const bytes = Uint8Array.from(atob(token.replace(/-/g, '+').replace(/_/g, '/')), (char) => char.charCodeAt(0));
+  const hex = env.LIVE_KEY.match(/../g).map((pair) => parseInt(pair, 16));
+  const key = await crypto.subtle.importKey('raw', new Uint8Array(hex), 'AES-GCM', false, ['decrypt']);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(0, 12) }, key, bytes.slice(12));
+  return new TextDecoder().decode(plain);
+}
+
+function liveTrack(item) {
+  const images = Array.isArray(item.image) ? item.image : [];
+  const image = (images.find((entry) => entry.size === 'large') ?? images.at(-1))?.['#text'] ?? '';
+  return {
+    artist: item.artist?.['#text'] ?? item.artist?.name ?? '',
+    track: item.name ?? '',
+    album: item.album?.['#text'] ?? '',
+    image: image.includes(LASTFM_PLACEHOLDER_IMAGE) ? '' : image,
+  };
+}
+
+// 지금 듣는 곡은 15분 수집을 기다리지 않고 Last.fm에서 바로 읽습니다.
+async function fetchLive(user, env) {
+  const params = new URLSearchParams({
+    method: 'user.getrecenttracks',
+    user,
+    limit: '1',
+    format: 'json',
+    api_key: env.LASTFM_API_KEY,
+  });
+  const response = await fetch(`https://ws.audioscrobbler.com/2.0/?${params}`);
+  if (!response.ok) return null;
+  const items = [(await response.json()).recenttracks?.track ?? []].flat();
+  const playing = items.find((item) => item['@attr']?.nowplaying === 'true');
+  const last = items.find((item) => item.date?.uts);
+  return {
+    nowPlaying: playing ? liveTrack(playing) : null,
+    lastPlayed: last ? { ...liveTrack(last), played_at: Number(last.date.uts) } : null,
+  };
+}
+
+// 보는 사람이 많아도 Last.fm에는 25초에 한 번만 묻습니다.
+async function liveResponse(request, env, url, cors) {
+  if (request.headers.get('Origin') !== env.ALLOWED_ORIGIN) return json({ error: 'forbidden' }, 403, cors);
+  if (!env.LIVE_KEY || !env.LASTFM_API_KEY) return json({ error: 'not configured' }, 503, cors);
+  const cache = globalThis.caches?.default;
+  const cached = await cache?.match(url.href);
+  if (cached) return cached;
+
+  let user;
+  try {
+    user = await openLiveToken(url.searchParams.get('t') ?? '', env);
+  } catch {
+    return json({ error: 'bad token' }, 400, cors);
+  }
+  const live = await fetchLive(user, env).catch(() => null);
+  if (!live) return json({ error: 'lastfm failed' }, 502, cors);
+  const response = json(live, 200, { ...cors, 'Cache-Control': `max-age=${LIVE_CACHE_SECONDS}` });
+  await cache?.put(url.href, response.clone());
+  return response;
+}
+
 export default {
   scheduled(_event, env, ctx) {
     ctx.waitUntil(startCollection(env));
@@ -101,6 +163,8 @@ export default {
       await startCollectionSoon(env);
       return json({ queued: true }, 200, cors);
     }
+
+    if (url.pathname === '/now' && request.method === 'GET') return liveResponse(request, env, url, cors);
 
     if (url.pathname === '/collect' && request.method === 'POST') {
       if (request.headers.get('Origin') !== env.ALLOWED_ORIGIN) return json({ error: 'forbidden' }, 403, cors);

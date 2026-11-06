@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig, loadEnvFile, ROOT } from './config.js';
-import { groupFileId, openBytes, openForCollector, publicKeyJwk, samePassword, sealBytes } from './crypto.js';
+import { groupFileId, openBytes, openForCollector, publicKeyJwk, samePassword, sealBytes, sealLiveToken } from './crypto.js';
 import {
   addGroup,
   addNotice,
@@ -33,10 +33,14 @@ const NOTICE_SECONDS = 7 * 86400;
 const DEFAULT_GROUP_ID = 1;
 
 // GitHub Pages에는 서버가 없으므로, 화면에 필요한 값을 그룹별로 미리 계산해 초대 코드로 암호화해 둡니다.
-export function buildSnapshot(db, groupId, { now, tzOffsetMinutes }) {
+export function buildSnapshot(db, groupId, { now, tzOffsetMinutes, liveKey = null }) {
   const weeks = Array.from({ length: MAX_WEEKS_BACK + 1 }, (_, week) => week);
+  const lastfmMembers = listMembers(db, groupId).filter((member) => !member.lastfm_user.startsWith('spotify:'));
   return {
     generatedAt: now,
+    liveTokens: liveKey
+      ? Object.fromEntries(lastfmMembers.map((member) => [member.id, sealLiveToken(member.lastfm_user, liveKey)]))
+      : {},
     notices: listNotices(db, groupId, now - NOTICE_SECONDS),
     overview: weeks.map((week) => buildOverview(db, { week, now, tzOffsetMinutes, groupId })),
     members: Object.fromEntries(
@@ -158,6 +162,7 @@ export async function collect({
   connect = null,
   openAccess = false,
   adminPassword = null,
+  liveKey = null,
 }) {
   // 복호화에 실패하면 여기서 멈춥니다. 빈 DB로 계속하면 쌓인 기록을 덮어쓰게 됩니다.
   if (existsSync(archivePath)) {
@@ -193,7 +198,7 @@ export async function collect({
   const now = nowSeconds();
   const adminGroups = [];
   for (const group of listGroups(db)) {
-    const snapshot = buildSnapshot(db, group.id, { now, tzOffsetMinutes: config.tzOffsetMinutes });
+    const snapshot = buildSnapshot(db, group.id, { now, tzOffsetMinutes: config.tzOffsetMinutes, liveKey });
     writeFileSync(join(outputDir, 'groups', `${groupFileId(group.code)}.enc`), sealBytes(JSON.stringify(snapshot), group.code));
     adminGroups.push(adminGroup(group, snapshot));
   }
@@ -242,6 +247,7 @@ async function main() {
     dbKey,
     openAccess: process.env.OPEN_ACCESS === '1',
     adminPassword: (process.env.ADMIN_PASSWORD ?? '').trim() || null,
+    liveKey: (process.env.LIVE_KEY ?? '').trim() || null,
     archivePath: process.env.DB_ARCHIVE || join(ROOT, 'crossfade.db.enc'),
     outputDir: join(ROOT, 'site'),
     client: createClient({ apiKey: config.apiKey, baseUrl: config.lastfmBaseUrl }),

@@ -75,6 +75,15 @@ export async function requestCollection(connect) {
   }
 }
 
+export async function fetchLive(connect, token) {
+  try {
+    const response = await fetch(`${connect.relayUrl}/now?t=${encodeURIComponent(token)}`);
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function spotifyRequest(url, options) {
   const response = await fetch(url, options);
   const body = await response.json().catch(() => null);

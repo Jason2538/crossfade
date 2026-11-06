@@ -1,9 +1,18 @@
 import { groupFileId, openSnapshot } from './snapshot.js';
-import { finishSpotifyLogin, requestCollection, sendToCollector, startSpotifyLogin, takeSpotifyCallback } from './spotify-login.js';
+import {
+  fetchLive,
+  finishSpotifyLogin,
+  requestCollection,
+  sendToCollector,
+  startSpotifyLogin,
+  takeSpotifyCallback,
+} from './spotify-login.js';
 
 const REFRESH_MS = 60_000;
 const MAX_WEEKS_BACK = 7;
 const SNAPSHOT_REFRESH_MS = 55_000;
+const LIVE_REFRESH_MS = 30_000;
+const LIVE_MAX_AGE_MS = 90_000;
 const COUNT_UP_MS = 900;
 const REFRESH_SPIN_MS = 500;
 const COLLECT_WATCH_MS = 15_000;
@@ -39,6 +48,7 @@ const state = {
   snapshotLoadedAt: 0,
   view: null,
   collecting: false,
+  live: new Map(),
   invite: takeInviteCode(),
   gateError: null,
   connect: null,
@@ -338,8 +348,32 @@ function hideStaleNowPlaying(data) {
   return { ...data, members: data.members.map((member) => ({ ...member, nowPlaying: null })) };
 }
 
+function withLive(data) {
+  const members = data.members.map((member) => {
+    const live = state.live.get(member.id);
+    if (!live || Date.now() - live.at > LIVE_MAX_AGE_MS) return member;
+    return { ...member, nowPlaying: live.nowPlaying, lastPlayed: live.lastPlayed ?? member.lastPlayed };
+  });
+  return { ...data, members };
+}
+
+// Last.fm으로 연결한 친구의 지금 듣는 곡을 수집과 상관없이 바로 바꿉니다.
+async function pollLive() {
+  const tokens = Object.entries(state.snapshot?.liveTokens ?? {});
+  if (document.hidden || !state.connect || !tokens.length) return;
+  const results = await Promise.all(tokens.map(async ([id, token]) => [Number(id), await fetchLive(state.connect, token)]));
+  let changed = false;
+  for (const [id, live] of results) {
+    if (!live) continue;
+    const before = state.live.get(id);
+    changed ||= JSON.stringify([before?.nowPlaying, before?.lastPlayed]) !== JSON.stringify([live.nowPlaying, live.lastPlayed]);
+    state.live.set(id, { ...live, at: Date.now() });
+  }
+  if (changed && state.view?.startsWith('home:')) render();
+}
+
 async function readOverview(week) {
-  if (state.snapshot) return hideStaleNowPlaying(state.snapshot.overview[week]);
+  if (state.snapshot) return withLive(hideStaleNowPlaying(state.snapshot.overview[week]));
   return api(`/api/overview?week=${week}`);
 }
 
@@ -1334,5 +1368,7 @@ window.addEventListener('hashchange', () => {
   window.scrollTo(0, 0);
   render();
 });
+document.addEventListener('visibilitychange', pollLive);
+setInterval(pollLive, LIVE_REFRESH_MS);
 setupTooltips();
-render();
+render().then(pollLive);
