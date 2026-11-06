@@ -8,6 +8,8 @@ const ITEM_PREFIX = 'item:';
 const RATE_PREFIX = 'rate:';
 const DISPATCH_KEY = 'dispatch';
 const DISPATCH_GAP_SECONDS = 60;
+const COLLECT_KEY = 'collect';
+const COLLECT_GAP_SECONDS = 180;
 
 const json = (body, status, headers) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
@@ -28,7 +30,7 @@ async function isOverLimit(request, env) {
 
 // GitHub의 schedule 은 제때 돌지 않을 때가 많아서 여기서 수집을 시작합니다.
 async function startCollection(env) {
-  if (!env.GITHUB_TOKEN) return;
+  if (!env.GITHUB_TOKEN) return false;
   try {
     const response = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/collect.yml/dispatches`, {
       method: 'POST',
@@ -42,8 +44,10 @@ async function startCollection(env) {
       body: JSON.stringify({ ref: 'main' }),
     });
     if (!response.ok) console.error('수집 시작 실패:', response.status);
+    return response.ok;
   } catch (error) {
     console.error('수집 시작 실패:', error.message);
+    return false;
   }
 }
 
@@ -52,6 +56,17 @@ async function startCollectionSoon(env) {
   if (await env.LOGINS.get(DISPATCH_KEY)) return;
   await env.LOGINS.put(DISPATCH_KEY, '1', { expirationTtl: DISPATCH_GAP_SECONDS });
   await startCollection(env);
+}
+
+// 새로고침 버튼용입니다. 여러 명이 눌러도 3분에 한 번만 시작하고, 진행 중이면 그 수집을 기다리게 합니다.
+async function collectNow(request, env) {
+  if (!env.GITHUB_TOKEN) return { started: false };
+  if (await env.LOGINS.get(COLLECT_KEY)) return { started: true };
+  if (await isOverLimit(request, env)) return { started: false };
+  await env.LOGINS.put(COLLECT_KEY, '1', { expirationTtl: COLLECT_GAP_SECONDS });
+  const started = await startCollection(env);
+  if (!started) await env.LOGINS.delete(COLLECT_KEY);
+  return { started };
 }
 
 export default {
@@ -85,6 +100,11 @@ export default {
       await env.LOGINS.put(`${ITEM_PREFIX}${crypto.randomUUID()}`, JSON.stringify(sealed), { expirationTtl: TTL_SECONDS });
       await startCollectionSoon(env);
       return json({ queued: true }, 200, cors);
+    }
+
+    if (url.pathname === '/collect' && request.method === 'POST') {
+      if (request.headers.get('Origin') !== env.ALLOWED_ORIGIN) return json({ error: 'forbidden' }, 403, cors);
+      return json(await collectNow(request, env), 200, cors);
     }
 
     if (!hasKey(request, env.READ_KEY)) return json({ error: 'unauthorized' }, 401);

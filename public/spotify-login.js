@@ -65,6 +65,16 @@ export async function sendToCollector(connect, payload) {
   if (!response.ok) throw new Error('요청을 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
 }
 
+// 수집을 시작했거나 이미 진행 중이면 true 입니다.
+export async function requestCollection(connect) {
+  try {
+    const response = await fetch(`${connect.relayUrl}/collect`, { method: 'POST' });
+    return response.ok && (await response.json()).started;
+  } catch {
+    return false;
+  }
+}
+
 async function spotifyRequest(url, options) {
   const response = await fetch(url, options);
   const body = await response.json().catch(() => null);

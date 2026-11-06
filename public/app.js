@@ -1,11 +1,13 @@
 import { groupFileId, openSnapshot } from './snapshot.js';
-import { finishSpotifyLogin, sendToCollector, startSpotifyLogin, takeSpotifyCallback } from './spotify-login.js';
+import { finishSpotifyLogin, requestCollection, sendToCollector, startSpotifyLogin, takeSpotifyCallback } from './spotify-login.js';
 
 const REFRESH_MS = 60_000;
 const MAX_WEEKS_BACK = 7;
 const SNAPSHOT_REFRESH_MS = 5 * 60_000;
 const COUNT_UP_MS = 900;
 const REFRESH_SPIN_MS = 500;
+const COLLECT_WATCH_MS = 15_000;
+const COLLECT_WATCH_TRIES = 20;
 // 수집이 이보다 오래 멈췄다면 "지금 듣는 중"은 더 이상 지금이 아닙니다.
 const NOW_PLAYING_TTL_SECONDS = 30 * 60;
 const CODE_STORAGE_KEY = 'crossfade.inviteCode';
@@ -36,6 +38,7 @@ const state = {
   snapshotCode: null,
   snapshotLoadedAt: 0,
   view: null,
+  collecting: false,
   invite: takeInviteCode(),
   gateError: null,
   connect: null,
@@ -294,17 +297,36 @@ async function refreshSnapshot() {
   await reloadSnapshot();
 }
 
+// 수집이 끝나 새 기록이 올라올 때까지 확인합니다.
+function watchCollection(since, tries = COLLECT_WATCH_TRIES) {
+  setTimeout(async () => {
+    const loaded = await reloadSnapshot();
+    if (!loaded || state.snapshot.generatedAt <= since) {
+      if (tries > 1) return watchCollection(since, tries - 1);
+      state.flash = '수집이 늦어지고 있어요. 잠시 후 다시 눌러 주세요.';
+    } else {
+      state.flash = '새 기록을 불러왔어요.';
+    }
+    state.collecting = false;
+    render();
+  }, COLLECT_WATCH_MS);
+}
+
 async function refreshNow(event) {
   const button = event.currentTarget;
   button.disabled = true;
   button.classList.add('busy');
   if (state.snapshot) {
     const before = state.snapshot.generatedAt;
-    const [loaded] = await Promise.all([
+    const [loaded, started] = await Promise.all([
       reloadSnapshot(),
+      state.connect ? requestCollection(state.connect) : false,
       new Promise((resolve) => setTimeout(resolve, REFRESH_SPIN_MS)),
     ]);
-    if (!loaded) state.flash = '기록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
+    if (started) {
+      state.collecting = true;
+      watchCollection(state.snapshot.generatedAt);
+    } else if (!loaded) state.flash = '기록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
     else if (state.snapshot.generatedAt > before) state.flash = '새 기록을 불러왔어요.';
     else state.flash = `아직 새 기록이 없어요. 마지막 수집은 ${timeAgo(before)}이에요.`;
   }
@@ -375,7 +397,14 @@ function header() {
       { class: 'topbar-actions' },
       el(
         'button',
-        { class: 'btn icon', type: 'button', title: '새로고침', 'aria-label': '새로고침', onclick: refreshNow },
+        {
+          class: `btn icon${state.collecting ? ' busy' : ''}`,
+          type: 'button',
+          title: '새로고침',
+          'aria-label': '새로고침',
+          disabled: state.collecting,
+          onclick: refreshNow,
+        },
         el('span', { class: 'refresh-icon', 'aria-hidden': 'true' }, '↻'),
       ),
       state.session.static ? el('button', { class: 'btn', type: 'button', onclick: shareInviteLink }, '초대 링크') : null,
@@ -386,6 +415,7 @@ function header() {
 
 function demoNotice() {
   if (state.flash) return el('p', { class: 'notice', role: 'status' }, state.flash);
+  if (state.collecting) return el('p', { class: 'notice', role: 'status' }, '새 기록을 모으는 중이에요. 2~3분 뒤 자동으로 바뀌어요.');
   if (state.snapshot) {
     return [
       el(

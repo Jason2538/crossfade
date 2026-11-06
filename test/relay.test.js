@@ -138,6 +138,42 @@ test('요청이 들어오면 수집을 시작하되 1분에 한 번만 시작한
   assert.equal(calls[0].options.body, '{"ref":"main"}');
 });
 
+test('새로고침 버튼은 사이트에서만 수집을 시작하고 3분에 한 번만 시작한다', async () => {
+  const realFetch = globalThis.fetch;
+  let called = 0;
+  globalThis.fetch = async () => {
+    called += 1;
+    return new Response(null, { status: 204 });
+  };
+  const env = { ...fakeEnv(), GITHUB_TOKEN: 'gh-token', GITHUB_REPO: 'owner/repo' };
+  const press = (origin = ORIGIN) => call(env, '/collect', { method: 'POST', origin });
+
+  assert.equal((await press('https://evil.example')).status, 403);
+  assert.deepEqual(await (await press()).json(), { started: true });
+  assert.deepEqual(await (await press()).json(), { started: true });
+  globalThis.fetch = realFetch;
+
+  assert.equal(called, 1);
+  assert.equal(env.store.get('collect'), '1');
+});
+
+test('토큰이 없거나 수집을 시작하지 못하면 버튼에 알린다', async () => {
+  const noToken = fakeEnv();
+  assert.deepEqual(await (await call(noToken, '/collect', { method: 'POST', origin: ORIGIN })).json(), { started: false });
+
+  const realFetch = globalThis.fetch;
+  const realError = console.error;
+  console.error = () => {};
+  globalThis.fetch = async () => new Response(null, { status: 401 });
+  const env = { ...fakeEnv(), GITHUB_TOKEN: 'expired', GITHUB_REPO: 'owner/repo' };
+  const response = await call(env, '/collect', { method: 'POST', origin: ORIGIN });
+  globalThis.fetch = realFetch;
+  console.error = realError;
+
+  assert.deepEqual(await response.json(), { started: false });
+  assert.equal(env.store.has('collect'), false);
+});
+
 test('수집 시작에 실패해도 요청은 대기열에 남는다', async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => {
