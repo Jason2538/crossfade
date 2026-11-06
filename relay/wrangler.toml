@@ -1,0 +1,10 @@
+name = "crossfade-relay"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+ALLOWED_ORIGIN = "https://jason2538.github.io"
+
+[[kv_namespaces]]
+binding = "LOGINS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

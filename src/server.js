@@ -36,6 +36,8 @@ const CONTENT_TYPES = {
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json',
 };
 
 const SECURITY_HEADERS = {
@@ -54,7 +56,7 @@ class HttpError extends Error {
   }
 }
 
-class SpotifyGroupFull extends Error {}
+export class SpotifyGroupFull extends Error {}
 
 export function createApp({ config, db, client, spotify = null }) {
   const failures = new Map();
@@ -217,7 +219,10 @@ export async function registerMember(db, client, body) {
 async function connectSpotify(db, spotify, code, verifier) {
   const tokens = await spotify.exchangeCode(code, verifier);
   const profile = await spotify.getProfile(tokens.accessToken);
-  const now = nowSeconds();
+  return saveSpotifyLogin(db, { profile, tokens, now: nowSeconds() });
+}
+
+export function saveSpotifyLogin(db, { profile, tokens, now }) {
 
   // 이미 연결된 친구는 인원이 다 찼어도 토큰이 만료되면 다시 로그인할 수 있어야 합니다.
   const existing = findSpotifyAccount(db, profile.id);

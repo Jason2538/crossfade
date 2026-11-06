@@ -1,4 +1,5 @@
 import { openSnapshot } from './snapshot.js';
+import { finishSpotifyLogin, startSpotifyLogin, takeSpotifyCallback } from './spotify-login.js';
 
 const REFRESH_MS = 60_000;
 const MAX_WEEKS_BACK = 7;
@@ -18,6 +19,7 @@ const SPOTIFY_MESSAGES = {
   notAllowed: '이 Spotify 계정은 아직 앱 사용자로 등록되어 있지 않아요. 그룹 관리자에게 Spotify 이메일을 알려 주세요.',
   full: 'Spotify 로그인은 5명까지만 쓸 수 있어요. Last.fm으로 연결해 주세요.',
   failed: 'Spotify 로그인에 실패했어요. 잠시 후 다시 시도해 주세요.',
+  queued: 'Spotify 계정을 연결했어요. 다음 수집 때(15분쯤) 그룹에 나타나요.',
 };
 
 const state = {
@@ -28,7 +30,18 @@ const state = {
   snapshot: null,
   snapshotCode: null,
   snapshotLoadedAt: 0,
+  invite: takeInviteCode(),
+  gateError: null,
+  spotifyCallback: takeSpotifyCallback(),
 };
+
+// 초대 링크의 # 뒷부분은 서버로 전송되지 않습니다. 주소창과 방문 기록에도 남지 않게 바로 지웁니다.
+function takeInviteCode() {
+  const code = location.hash.match(/^#invite=(.+)$/)?.[1];
+  if (!code) return null;
+  history.replaceState(null, '', location.pathname + location.search);
+  return decodeURIComponent(code);
+}
 
 function takeSpotifyResult() {
   const result = new URLSearchParams(location.search).get('spotify');
@@ -76,6 +89,8 @@ function rememberCode(code) {
   try {
     if (code) localStorage.setItem(CODE_STORAGE_KEY, code);
     else localStorage.removeItem(CODE_STORAGE_KEY);
+    // 홈 화면 앱에서 저장된 코드가 지워지지 않도록 요청합니다.
+    if (code) navigator.storage?.persist?.().catch(() => {});
   } catch {
     // 저장하지 못하면 다음 방문 때 코드를 다시 입력하면 됩니다.
   }
@@ -102,16 +117,51 @@ async function loadSession() {
   if (!sealed) return api('/api/session');
 
   const session = { demo: false, spotifyLogin: false, static: true, authed: false };
-  const code = savedCode();
-  if (code) {
+  const saved = savedCode();
+  for (const code of [state.invite, saved]) {
+    if (!code || session.authed) continue;
     try {
       await unlock(sealed, code);
+      rememberCode(code);
       session.authed = true;
     } catch {
-      rememberCode(null);
+      if (code === saved) rememberCode(null);
+      else state.gateError = '초대 링크가 맞지 않아요. 코드를 직접 입력해 주세요.';
     }
   }
+  if (session.authed) state.gateError = null;
+  state.invite = null;
   return session;
+}
+
+async function completeSpotifyLogin() {
+  const callback = state.spotifyCallback;
+  if (!callback) return;
+  state.spotifyCallback = null;
+  try {
+    const result = callback.code ? await finishSpotifyLogin(state.snapshot.connect, callback) : 'denied';
+    state.flash = SPOTIFY_MESSAGES[result];
+  } catch (failure) {
+    state.flash = SPOTIFY_MESSAGES[failure.status === 403 ? 'notAllowed' : 'failed'];
+  }
+}
+
+async function shareInviteLink(event) {
+  const button = event.currentTarget;
+  const url = `${location.origin}${location.pathname}#invite=${encodeURIComponent(state.snapshotCode)}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: '크로스페이드 초대', url });
+      return;
+    }
+    await navigator.clipboard.writeText(url);
+    button.textContent = '복사했어요';
+    setTimeout(() => {
+      button.textContent = '초대 링크';
+    }, 1500);
+  } catch (failure) {
+    if (failure.name !== 'AbortError') prompt('이 링크를 복사해 친구에게 보내 주세요.', url);
+  }
 }
 
 async function refreshSnapshot() {
@@ -184,7 +234,12 @@ function header() {
     'header',
     { class: 'topbar' },
     el('a', { class: 'brand', href: '#/' }, el('img', { src: 'favicon.svg', alt: '' }), '크로스페이드'),
-    el('button', { class: 'btn primary', type: 'button', onclick: openAddDialog }, '친구 추가'),
+    el(
+      'div',
+      { class: 'topbar-actions' },
+      state.session.static ? el('button', { class: 'btn', type: 'button', onclick: shareInviteLink }, '초대 링크') : null,
+      el('button', { class: 'btn primary', type: 'button', onclick: openAddDialog }, '친구 추가'),
+    ),
   );
 }
 
@@ -680,7 +735,7 @@ async function unlockWithCode(code) {
 }
 
 function renderGate() {
-  const error = el('p', { class: 'form-error', role: 'alert' });
+  const error = el('p', { class: 'form-error', role: 'alert' }, state.gateError);
   const input = el('input', { type: 'password', name: 'code', autocomplete: 'off', required: true, autofocus: true });
   app.replaceChildren(
     el(
@@ -733,16 +788,23 @@ function openAddDialog() {
   const isStatic = state.session.static;
   const error = el('p', { class: 'form-error', role: 'alert' });
   const steps = el('ol', { class: 'steps' });
+  const canSpotifyLogin = isStatic ? Boolean(state.snapshot?.connect) : state.session.spotifyLogin;
   const spotifyLogin = el(
     'div',
     { class: 'spotify-login' },
-    el('a', { class: 'btn primary', href: '/api/spotify/login' }, 'Spotify로 로그인'),
+    isStatic
+      ? el(
+          'button',
+          { class: 'btn primary', type: 'button', onclick: () => startSpotifyLogin(state.snapshot.connect) },
+          'Spotify로 로그인',
+        )
+      : el('a', { class: 'btn primary', href: '/api/spotify/login' }, 'Spotify로 로그인'),
     el('p', {}, '최대 5명까지 가능하고, 관리자가 Spotify 앱에 이메일을 등록한 계정만 로그인할 수 있어요. 아래처럼 Last.fm으로 연결해도 됩니다.'),
   );
   const showSteps = (service) => {
     const texts = isStatic ? [...SETUP_STEPS[service].slice(0, -1), JOIN_STEP] : SETUP_STEPS[service];
     steps.replaceChildren(...texts.map((text) => el('li', {}, text)));
-    spotifyLogin.hidden = service !== 'spotify' || !state.session.spotifyLogin;
+    spotifyLogin.hidden = service !== 'spotify' || !canSpotifyLogin;
   };
   showSteps('spotify');
 
@@ -861,6 +923,7 @@ async function render() {
     if (!state.session) state.session = await loadSession();
     await refreshSnapshot();
     if (!state.session.authed) return renderGate();
+    await completeSpotifyLogin();
 
     const memberId = location.hash.match(/^#\/member\/(\d+)$/)?.[1];
     if (memberId) await renderMember(memberId);

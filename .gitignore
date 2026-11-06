@@ -4,3 +4,4 @@ node_modules/
 site/
 crossfade.db.enc
 .claude/
+.wrangler/

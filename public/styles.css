@@ -108,6 +108,11 @@ a {
   margin-bottom: 28px;
 }
 
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .brand {
   display: inline-flex;
   align-items: center;
@@ -961,6 +966,7 @@ fieldset.field {
 
 .spotify-login .btn {
   display: flex;
+  width: 100%;
   align-items: center;
   justify-content: center;
   text-decoration: none;
