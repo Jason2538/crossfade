@@ -149,6 +149,10 @@ export function getMember(db, id) {
   return db.prepare('SELECT * FROM members WHERE id = ?').get(id);
 }
 
+export function moveMember(db, id, groupId) {
+  db.prepare('UPDATE members SET group_id = ? WHERE id = ?').run(groupId, id);
+}
+
 export function removeMember(db, id) {
   return db.prepare('DELETE FROM members WHERE id = ?').run(id).changes > 0;
 }

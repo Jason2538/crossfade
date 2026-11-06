@@ -5,7 +5,17 @@ import { finishSpotifyLogin, sealForCollector, takeSpotifyCallback } from '../pu
 import worker from '../relay/worker.js';
 import { MAX_GROUPS, processQueue } from '../src/collect.js';
 import { openForCollector, publicKeyJwk } from '../src/crypto.js';
-import { addGroup, addMember, getSpotifyAccount, listGroups, listMembers, listNotices, openDb } from '../src/db.js';
+import {
+  addGroup,
+  addMember,
+  getSpotifyAccount,
+  insertScrobbles,
+  latestPlayedAt,
+  listGroups,
+  listMembers,
+  listNotices,
+  openDb,
+} from '../src/db.js';
 
 const NOW = 1_800_000_000;
 const { privateKey } = generateKeyPairSync('rsa', {
@@ -235,19 +245,30 @@ test('받아 온 로그인을 멤버로 등록하고, 다시 로그인하면 토
   assert.equal(getSpotifyAccount(db, member.id).refresh_token, 'refresh-2');
 });
 
-test('Spotify 인원이 차거나 다른 그룹에 연결된 계정이면 그룹에 알린다', async () => {
+test('Spotify 인원이 차면 그룹에 알린다', async () => {
   const db = groupDb();
   const [group] = listGroups(db);
-  addGroup(db, 'other-code', NOW);
   for (let i = 0; i < 5; i += 1) await processQueue(db, fakeClient, await queueOf(login(`friend${i}`)), privateKey, NOW);
 
   await processQueue(db, fakeClient, await queueOf(login('friend5')), privateKey, NOW);
   assert.equal(listMembers(db).length, 5);
   assert.match(listNotices(db, group.id, 0)[0], /5명까지만/);
+});
 
-  await processQueue(db, fakeClient, await queueOf({ ...login('friend0'), code: 'other-code' }), privateKey, NOW);
-  assert.equal(listMembers(db, group.id).length, 5);
-  assert.match(listNotices(db, listGroups(db)[1].id, 0)[0], /한 그룹에만/);
+test('다른 그룹에서 로그인하면 계정이 기록과 함께 그 그룹으로 옮겨진다', async () => {
+  const db = groupDb();
+  const [first] = listGroups(db);
+  const second = addGroup(db, 'other-code', NOW);
+  await processQueue(db, fakeClient, await queueOf(login('friend')), privateKey, NOW);
+  const [member] = listMembers(db, first.id);
+  insertScrobbles(db, member.id, [{ artist: 'A', track: 'T', album: '', image: '', playedAt: NOW - 600 }]);
+
+  await processQueue(db, fakeClient, await queueOf({ ...login('friend', 'refresh-2'), code: 'other-code' }), privateKey, NOW);
+  assert.equal(listMembers(db, first.id).length, 0);
+  const [moved] = listMembers(db, second);
+  assert.equal(moved.id, member.id);
+  assert.equal(getSpotifyAccount(db, moved.id).refresh_token, 'refresh-2');
+  assert.equal(latestPlayedAt(db, moved.id), NOW - 600);
 });
 
 test('풀 수 없는 요청과 모르는 종류는 건너뛰고 대기열에서 지운다', async () => {

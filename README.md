@@ -61,7 +61,7 @@ Spotify 친구는 Last.fm 없이 Spotify 계정으로 바로 연결할 수도 �
 
 그룹 만들기, 친구 추가, Spotify 로그인은 `relay/` 의 Cloudflare Worker 대기열을 거쳐 수집기로 전달됩니다. 요청은 브라우저에서 수집기 공개 키로 암호화되므로 Worker는 읽을 수 없고, 수집기는 초대 코드가 맞는 그룹에만 반영합니다.
 
-Spotify 친구는 Last.fm으로 연결하거나 Spotify 계정으로 바로 로그인할 수 있습니다. Spotify 로그인은 모든 그룹을 합쳐 5명까지이고, 계정 하나는 한 그룹에만 연결됩니다.
+Spotify 친구는 Last.fm으로 연결하거나 Spotify 계정으로 바로 로그인할 수 있습니다. Spotify 로그인은 모든 그룹을 합쳐 5명까지이고, 계정 하나는 한 그룹에만 연결되며, 다른 그룹에서 로그인하면 기록과 함께 그 그룹으로 옮겨집니다.
 
 1. Spotify 앱의 Redirect URI에 사이트 주소(`https://<사용자>.github.io/crossfade/`)를 등록하고, Users Management에 친구의 Spotify 이메일을 추가합니다.
 2. `relay/` 에서 KV를 만들어 `wrangler.toml` 에 id를 넣고, `READ_KEY` 비밀값을 설정한 뒤 배포합니다.

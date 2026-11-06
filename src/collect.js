@@ -12,6 +12,7 @@ import {
   listGroups,
   listMembers,
   listNotices,
+  moveMember,
   openDb,
   removeMember,
   saveDefaultGroup,
@@ -74,11 +75,9 @@ const HANDLERS = {
   },
 
   spotify(db, _client, request, now, group) {
+    // 계정 주인이 로그인한 그룹으로 기록과 함께 옮깁니다.
     const existing = findSpotifyAccount(db, request.spotifyId);
-    if (existing && getMember(db, existing.member_id).group_id !== group.id) {
-      addNotice(db, group.id, 'Spotify 계정 하나는 한 그룹에만 연결할 수 있어요.', now);
-      return;
-    }
+    if (existing) moveMember(db, existing.member_id, group.id);
     try {
       saveSpotifyLogin(db, {
         profile: { id: request.spotifyId, displayName: request.displayName },
