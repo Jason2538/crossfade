@@ -38,16 +38,14 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
-    env:
-      MEMBER_ACTION: ${{ inputs.action }}
-      MEMBER_NAME: ${{ inputs.name }}
-      MEMBER_LASTFM: ${{ inputs.lastfm_user }}
-      MEMBER_SERVICE: ${{ inputs.service }}
     steps:
+      # 공개 저장소의 로그는 누구나 볼 수 있습니다. env로 넘기면 가리기 전에 로그에 찍히므로 이벤트 파일에서 읽습니다.
       - name: Hide member details from logs
         run: |
-          [ -z "$MEMBER_NAME" ] || echo "::add-mask::$MEMBER_NAME"
-          [ -z "$MEMBER_LASTFM" ] || echo "::add-mask::$MEMBER_LASTFM"
+          for field in name lastfm_user; do
+            value=$(jq -r ".inputs.$field // empty" "$GITHUB_EVENT_PATH")
+            [ -z "$value" ] || echo "::add-mask::$value"
+          done
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
@@ -64,6 +62,10 @@ jobs:
           INVITE_CODE: ${{ secrets.INVITE_CODE }}
           DB_KEY: ${{ secrets.DB_KEY }}
           DB_PATH: ${{ runner.temp }}/crossfade.db
+          MEMBER_ACTION: ${{ inputs.action }}
+          MEMBER_NAME: ${{ inputs.name }}
+          MEMBER_LASTFM: ${{ inputs.lastfm_user }}
+          MEMBER_SERVICE: ${{ inputs.service }}
       # 저장소가 커지지 않도록 data 브랜치에는 커밋을 하나만 둡니다.
       - name: Save database
         run: |
