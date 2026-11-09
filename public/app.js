@@ -47,6 +47,10 @@ const state = {
   snapshotCode: null,
   snapshotLoadedAt: 0,
   view: null,
+  rankPeriod: 'week',
+  rankMetric: 'minutes',
+  compareWith: null,
+  activityAll: false,
   collecting: false,
   live: new Map(),
   invite: takeInviteCode(),
@@ -575,10 +579,40 @@ function deltaLabel(member) {
   return el('span', { class: `delta${up ? ' up' : ''}` }, `${up ? '▲' : '▼'} ${Math.abs(percent)}%`);
 }
 
-function rankingSection(data) {
-  const { members, week } = data;
-  const max = Math.max(1, ...members.map((m) => m.minutes));
+const PERIOD_NAMES = { today: '오늘', week: '이번 주', month: '이번 달' };
+const METRIC_NAMES = { minutes: '재생 시간', plays: '재생 횟수' };
+
+function segments(options, current, onPick) {
+  return el(
+    'div',
+    { class: 'segments', role: 'group' },
+    Object.entries(options).map(([value, label]) =>
+      el(
+        'button',
+        { type: 'button', class: value === current ? 'on' : null, 'aria-pressed': String(value === current), onclick: () => onPick(value) },
+        label,
+      ),
+    ),
+  );
+}
+
+const streakBadge = (days) => (days >= 2 ? el('span', { class: 'streak', title: `${days}일 연속으로 들었어요` }, `🔥 ${days}`) : null);
+
+function rankingSection(data, social) {
+  const { week } = data;
+  const live = Boolean(social) && week.offset === 0;
+  const period = live ? state.rankPeriod : 'week';
+  const metric = state.rankMetric;
+  const statOf = (member) => (live ? social.members[member.id]?.[period] ?? { minutes: 0, plays: 0 } : member);
+  const members = [...data.members].sort(
+    (a, b) => statOf(b)[metric] - statOf(a)[metric] || statOf(b).minutes - statOf(a).minutes || a.id - b.id,
+  );
+  const max = Math.max(1, ...members.map((member) => statOf(member)[metric]));
   const estimated = data.group.plays ? Math.round((data.group.estimatedPlays / data.group.plays) * 100) : 0;
+  const pick = (key) => (value) => {
+    state[key] = value;
+    render();
+  };
 
   return el(
     'section',
@@ -586,7 +620,7 @@ function rankingSection(data) {
     el(
       'div',
       { class: 'section-head' },
-      el('h2', {}, `${weekName(week.offset)} 랭킹`),
+      el('h2', {}, live ? `${PERIOD_NAMES[period]} 순위` : `${weekName(week.offset)} 랭킹`),
       el(
         'span',
         { class: 'legend' },
@@ -595,10 +629,20 @@ function rankingSection(data) {
       ),
     ),
     el(
+      'div',
+      { class: 'rank-controls' },
+      live ? segments(PERIOD_NAMES, period, pick('rankPeriod')) : null,
+      segments(METRIC_NAMES, metric, pick('rankMetric')),
+    ),
+    el(
       'ol',
       { class: 'card rank-list' },
-      members.map((member, index) =>
-        el(
+      members.map((member, index) => {
+        const stat = statOf(member);
+        const streak = social?.members[member.id]?.streak ?? 0;
+        const value = metric === 'minutes' ? `${number(stat.minutes)}분` : `${number(stat.plays)}회`;
+        const other = metric === 'minutes' ? `${number(stat.plays)}회` : `${number(stat.minutes)}분`;
+        return el(
           'li',
           {},
           el(
@@ -608,48 +652,320 @@ function rankingSection(data) {
             el(
               'span',
               { class: 'rank-name' },
-              el('b', {}, member.name),
+              el('b', {}, member.name, live ? streakBadge(streak) : null),
               el('span', { class: 'service' }, SERVICE_NAMES[member.service]),
             ),
             el(
               'span',
               {
                 class: 'rank-bar',
-                'data-tip': `${member.name}: ${number(member.minutes)}분 · ${number(member.plays)}회 재생 · ${number(member.uniqueTracks)}곡`,
+                'data-tip': `${member.name}: ${number(stat.minutes)}분 · ${number(stat.plays)}회 재생`,
               },
               el(
                 'div',
                 { class: 'bar-track', 'aria-hidden': 'true' },
                 el('div', {
                   class: `bar-fill ${member.service}`,
-                  style: { width: `${(member.minutes / max) * 100}%`, animationDelay: `${300 + index * 70}ms` },
+                  style: { width: `${(stat[metric] / max) * 100}%`, animationDelay: `${300 + index * 70}ms` },
                 }),
               ),
               el(
                 'div',
                 { class: 'sub-line' },
-                member.topTrack ? `가장 많이 들은 곡: ${member.topTrack.track}` : '이번 주 기록이 없어요',
+                period === 'week'
+                  ? member.topTrack
+                    ? `가장 많이 들은 곡: ${member.topTrack.track}`
+                    : '이번 주 기록이 없어요'
+                  : '',
               ),
             ),
             el(
               'span',
               { class: 'rank-values' },
-              el('b', {}, `${number(member.minutes)}분`),
-              el('span', {}, `${number(member.plays)}회 · ${number(member.uniqueTracks)}곡 `, deltaLabel(member)),
+              el('b', {}, value),
+              el(
+                'span',
+                {},
+                period === 'week' ? `${other} · ${number(member.uniqueTracks)}곡 ` : other,
+                period === 'week' && metric === 'minutes' ? deltaLabel(member) : null,
+              ),
             ),
             member.error ? el('span', { class: 'warn-line' }, `⚠ 동기화 문제: ${member.error}`) : null,
           ),
-        ),
-      ),
+        );
+      }),
     ),
     el(
       'p',
       { class: 'footnote' },
       '청취 시간은 재생한 곡의 전체 길이를 더한 값이라 실제와 조금 다를 수 있어요.',
-      week.offset === 0 ? ' 증감은 지난주 같은 시점까지와 비교한 값이에요.' : ' 증감은 그 전 주와 비교한 값이에요.',
+      period === 'week' ? (week.offset === 0 ? ' 증감은 지난주 같은 시점까지와 비교한 값이에요.' : ' 증감은 그 전 주와 비교한 값이에요.') : '',
+      live ? ' 🔥는 며칠 연속으로 들었는지예요.' : '',
       estimated ? ` 재생 기록의 ${estimated}%는 곡 길이를 몰라 3분 30초로 계산했어요.` : '',
     ),
   );
+}
+
+function friendsSummary(data, social) {
+  if (!social || data.week.offset !== 0 || !data.members.length) return null;
+  const best = (score) => [...data.members].sort((a, b) => score(b) - score(a))[0];
+  const weekly = best((member) => social.members[member.id]?.week.minutes ?? 0);
+  const streaky = best((member) => social.members[member.id]?.streak ?? 0);
+  const playing = data.members.filter((member) => member.nowPlaying);
+  const weeklyMinutes = social.members[weekly.id]?.week.minutes ?? 0;
+  const streakDays = social.members[streaky.id]?.streak ?? 0;
+  const card = (label, value, detail) =>
+    el('div', { class: 'card stat' }, el('span', {}, label), el('b', {}, value), el('span', {}, detail));
+  return el(
+    'div',
+    { class: 'stat-row three section' },
+    card('이번 주 1등', weeklyMinutes ? weekly.name : '–', weeklyMinutes ? `${number(weeklyMinutes)}분` : '아직 기록이 없어요'),
+    card('연속 기록 1등', streakDays ? streaky.name : '–', streakDays ? `🔥 ${streakDays}일 연속` : '아직 기록이 없어요'),
+    card(
+      '지금 듣는 친구',
+      `${playing.length}명`,
+      playing.length ? playing.map((member) => member.name).join(', ') : '지금은 조용해요',
+    ),
+  );
+}
+
+const ACTIVITY_PREVIEW = 8;
+
+const searchText = (item) => encodeURIComponent(`${item.track} ${item.artist}`);
+
+// Luma처럼 바로 같이 들을 수는 없어서, 각자 쓰는 앱에서 같은 곡을 찾아 줍니다.
+function listenLinks(item) {
+  const link = (href, label) => el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, label);
+  return el(
+    'span',
+    { class: 'listen-links' },
+    link(`https://open.spotify.com/search/${searchText(item)}`, 'Spotify'),
+    link(`https://music.apple.com/kr/search?term=${searchText(item)}`, 'Apple Music'),
+  );
+}
+
+const nameIn = (data) => {
+  const names = new Map(data.members.map((member) => [member.id, member.name]));
+  return (id) => names.get(id) ?? '나간 친구';
+};
+
+function activitySection(data, social) {
+  if (!social?.activity.length || data.week.offset !== 0) return null;
+  const nameOf = nameIn(data);
+  return el(
+    'section',
+    { class: 'section' },
+    el('div', { class: 'section-head' }, el('h2', {}, '최근 활동'), el('span', {}, '친구들이 최근 들은 곡')),
+    el(
+      'ul',
+      { class: 'card list no-rank activity' },
+      social.activity.slice(0, state.activityAll ? social.activity.length : ACTIVITY_PREVIEW).map((item) =>
+        el(
+          'li',
+          {},
+          cover(item, true),
+          el(
+            'span',
+            { style: { minWidth: '0' } },
+            el('div', { class: 'title-line' }, item.track),
+            el('div', { class: 'sub-line' }, el('a', { class: 'who-link', href: `#/member/${item.memberId}` }, nameOf(item.memberId)), ` · ${item.artist}`),
+          ),
+          el('span', { class: 'count' }, timeAgo(item.playedAt), listenLinks(item)),
+        ),
+      ),
+    ),
+    social.activity.length > ACTIVITY_PREVIEW
+      ? el(
+          'button',
+          {
+            class: 'link-button more',
+            type: 'button',
+            onclick: () => {
+              state.activityAll = !state.activityAll;
+              render();
+            },
+          },
+          state.activityAll ? '접기' : `더 보기 (${social.activity.length - ACTIVITY_PREVIEW}곡)`,
+        )
+      : null,
+  );
+}
+
+function groupTopSection(data, social) {
+  if (!social || data.week.offset !== 0) return null;
+  const nameOf = nameIn(data);
+  const who = (item) => item.listeners.map(nameOf).join(', ');
+  return el(
+    'div',
+    { class: 'two-col section' },
+    el(
+      'section',
+      {},
+      el('div', { class: 'section-head' }, el('h2', {}, '이번 주 우리가 많이 들은 곡')),
+      rankedList(
+        social.groupTop.tracks,
+        (item) =>
+          el('span', { style: { minWidth: '0' } }, el('div', { class: 'title-line' }, item.track), el('div', { class: 'sub-line' }, `${item.artist} · ${who(item)}`)),
+        '이번 주에는 기록이 없어요.',
+      ),
+    ),
+    el(
+      'section',
+      {},
+      el('div', { class: 'section-head' }, el('h2', {}, '이번 주 우리가 많이 들은 아티스트')),
+      rankedList(
+        social.groupTop.artists,
+        (item) => el('span', { style: { minWidth: '0' } }, el('div', { class: 'title-line' }, item.artist), el('div', { class: 'sub-line' }, who(item))),
+        '이번 주에는 기록이 없어요.',
+      ),
+    ),
+  );
+}
+
+function barChart(values, labels, tipOf, columns = values.length) {
+  const max = Math.max(1, ...values);
+  const peak = values.indexOf(Math.max(...values));
+  const grid = { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` };
+  return el(
+    'div',
+    {},
+    el(
+      'div',
+      { class: 'day-chart', style: grid },
+      values.map((minutes, index) =>
+        el(
+          'div',
+          { class: 'day-col', 'data-tip': tipOf(index, minutes) },
+          index === peak && minutes > 0 ? el('em', {}, `${number(minutes)}분`) : null,
+          el('i', { style: { height: `${(minutes / max) * 82}%`, animationDelay: `${300 + index * 45}ms` } }),
+        ),
+      ),
+    ),
+    el('div', { class: 'day-labels', style: grid }, labels.map((label) => el('span', {}, label))),
+  );
+}
+
+function compareSection(member, data, social) {
+  const others = data.members.filter((other) => other.id !== member.id);
+  if (!others.length) return null;
+  const otherId = others.some((other) => other.id === state.compareWith) ? state.compareWith : others[0].id;
+  const other = others.find((candidate) => candidate.id === otherId);
+  const pair = social.pairs.find((p) => (p.a === member.id && p.b === otherId) || (p.b === member.id && p.a === otherId));
+  const select = el(
+    'select',
+    {
+      class: 'compare-select',
+      'aria-label': '비교할 친구',
+      onchange: (event) => {
+        state.compareWith = Number(event.currentTarget.value);
+        render();
+      },
+    },
+    others.map((candidate) => el('option', { value: candidate.id, selected: candidate.id === otherId }, candidate.name)),
+  );
+  const mine = social.members[member.id];
+  const theirs = social.members[otherId];
+  const versus = (label, key) =>
+    el('div', { class: 'versus' }, el('span', {}, label), el('b', {}, `${number(mine[key].minutes)}분`), el('i', {}, 'vs'), el('b', {}, `${number(theirs[key].minutes)}분`));
+
+  return el(
+    'section',
+    { class: 'section' },
+    el('div', { class: 'section-head' }, el('h2', {}, '취향 궁합'), select),
+    el(
+      'div',
+      { class: 'card chart-card compare' },
+      pair
+        ? [
+            el(
+              'div',
+              { class: 'compare-scores' },
+              el('div', {}, el('b', {}, `${pair.score}%`), el('span', {}, '아티스트 궁합')),
+              el('div', {}, el('b', {}, `${pair.hourScore}%`), el('span', {}, '듣는 시간대 궁합')),
+            ),
+            pair.sharedArtists.length
+              ? el('div', { class: 'chips' }, pair.sharedArtists.map((artist) => el('span', { class: 'chip' }, artist)))
+              : el('p', { class: 'pair-tracks' }, '같이 좋아하는 아티스트가 아직 없어요'),
+            pair.sharedTracks.length
+              ? el('p', { class: 'pair-tracks' }, `둘 다 들은 곡: ${pair.sharedTracks.map((t) => t.track).join(', ')}`)
+              : null,
+          ]
+        : el('p', { class: 'pair-tracks' }, '최근 30일 기록이 더 쌓이면 궁합을 보여 줄게요.'),
+      el('h3', { class: 'compare-title' }, `${member.name} vs ${other.name} 재생 시간`),
+      versus('오늘', 'today'),
+      versus('이번 주', 'week'),
+      versus('이번 달', 'month'),
+      el('h3', { class: 'compare-title' }, '듣는 시간대 (최근 30일)'),
+      el('p', { class: 'hour-who' }, member.name),
+      hourStrip(mine.byHour30, false),
+      el('p', { class: 'hour-who' }, other.name),
+      hourStrip(theirs.byHour30, false),
+    ),
+  );
+}
+
+function memberSocial(id, data, current) {
+  const social = state.snapshot?.social;
+  const mine = social?.members[id];
+  if (!mine) return null;
+  const today = new Date();
+  const dayLabels = mine.days7.map((_, i) => {
+    const date = new Date(today.getTime() - (6 - i) * 86_400_000);
+    return i === 6 ? '오늘' : DAY_NAMES[(date.getDay() + 6) % 7];
+  });
+  const weekLabels = ['3주 전', '2주 전', '지난주', '이번 주'];
+  const playing = current?.nowPlaying ?? current?.lastPlayed;
+  return [
+    playing
+      ? el(
+          'div',
+          { class: 'card now-card section' },
+          cover(playing),
+          el(
+            'span',
+            { style: { minWidth: '0' } },
+            el('span', { class: 'who' }, current.nowPlaying ? [equalizer(), ' 지금 듣는 중'] : `마지막으로 들은 곡 · ${timeAgo(playing.played_at)}`),
+            el('div', { class: 'title-line' }, playing.track),
+            el('div', { class: 'sub-line' }, playing.artist),
+          ),
+          el('span', { class: 'now-listen' }, el('span', {}, '같이 듣기'), listenLinks(playing)),
+        )
+      : null,
+    el(
+      'div',
+      { class: 'stat-row three' },
+      [
+        [mine.month.minutes, '이번 달(분)'],
+        [mine.last30.minutes, '최근 30일(분)'],
+        [mine.streak, '연속으로 들은 날'],
+      ].map(([value, label]) => el('div', { class: 'card stat' }, counted(value), el('span', {}, label))),
+    ),
+    el(
+      'div',
+      { class: 'two-col section' },
+      el(
+        'section',
+        {},
+        el('div', { class: 'section-head' }, el('h2', {}, '최근 7일')),
+        el('div', { class: 'card chart-card' }, barChart(mine.days7, dayLabels, (i, m) => `${dayLabels[i]}: ${number(m)}분`)),
+      ),
+      el(
+        'section',
+        {},
+        el('div', { class: 'section-head' }, el('h2', {}, '최근 4주')),
+        el('div', { class: 'card chart-card' }, barChart(mine.weeks4, weekLabels, (i, m) => `${weekLabels[i]}: ${number(m)}분`)),
+      ),
+    ),
+    mine.topArtists30.length
+      ? el(
+          'section',
+          { class: 'section' },
+          el('div', { class: 'section-head' }, el('h2', {}, '요즘 많이 듣는 아티스트'), el('span', {}, '최근 30일')),
+          el('div', { class: 'chips' }, mine.topArtists30.map((item) => el('span', { class: 'chip' }, `${item.artist} · ${number(item.plays)}회`))),
+        )
+      : null,
+    compareSection({ id: Number(id), name: data.name }, current?.overview ?? { members: [] }, social),
+  ];
 }
 
 function tasteSection(data) {
@@ -721,6 +1037,7 @@ function emptyHome() {
 async function renderHome() {
   const data = await readOverview(state.week);
   const { group, members, week } = data;
+  const social = state.snapshot?.social ?? null;
   const changeWeek = (offset) => {
     state.week = offset;
     render();
@@ -756,7 +1073,16 @@ async function renderHome() {
         ),
       ),
       fader(members),
-      members.length ? [nowPlayingSection(members), rankingSection(data), tasteSection(data)] : emptyHome(),
+      members.length
+        ? [
+            friendsSummary(data, social),
+            nowPlayingSection(members),
+            rankingSection(data, social),
+            activitySection(data, social),
+            groupTopSection(data, social),
+            tasteSection(data),
+          ]
+        : emptyHome(),
       state.session.static
         ? el(
             'p',
@@ -791,7 +1117,7 @@ function dayChart(byDay) {
   );
 }
 
-function hourStrip(byHour) {
+function hourStrip(byHour, withLabels = true) {
   const max = Math.max(1, ...byHour);
   const peak = byHour.indexOf(Math.max(...byHour));
   const level = (minutes) => (minutes === 0 ? 0 : Math.max(1, Math.ceil((minutes / max) * 5)));
@@ -814,7 +1140,7 @@ function hourStrip(byHour) {
       { class: 'hour-labels' },
       ['0시', '6시', '12시', '18시', '24시'].map((label) => el('span', {}, label)),
     ),
-    byHour[peak] > 0 ? el('p', { class: 'peak-note' }, `가장 많이 듣는 시간은 ${peak}시대예요.`) : null,
+    withLabels && byHour[peak] > 0 ? el('p', { class: 'peak-note' }, `가장 많이 듣는 시간은 ${peak}시대예요.`) : null,
   );
 }
 
@@ -838,6 +1164,8 @@ function rankedList(items, renderTitle, emptyText) {
 
 async function renderMember(id) {
   const data = await readMember(id, state.week);
+  const overview = state.snapshot ? await readOverview(0) : null;
+  const current = overview ? { ...overview.members.find((member) => member.id === Number(id)), overview } : null;
   const changeWeek = (offset) => {
     state.week = offset;
     render();
@@ -876,6 +1204,7 @@ async function renderMember(id) {
           [data.uniqueArtists, '아티스트'],
         ].map(([value, label]) => el('div', { class: 'card stat' }, counted(value), el('span', {}, label))),
       ),
+      memberSocial(Number(id), data, current),
       el(
         'div',
         { class: 'two-col section' },

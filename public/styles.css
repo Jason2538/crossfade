@@ -1137,6 +1137,175 @@ dialog h2 {
   pointer-events: none;
 }
 
+.stat-row.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.stat-row.three .stat > span:first-child {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.stat-row.three .stat b {
+  overflow: hidden;
+  font-size: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.segments {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.segments button {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.segments button.on {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.streak {
+  margin-left: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.listen-links {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.listen-links a {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.listen-links a:hover {
+  text-decoration: underline;
+}
+
+.who-link {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.activity .count {
+  text-align: right;
+}
+
+.now-card {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+}
+
+.now-card .who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.now-listen {
+  text-align: right;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.compare-select {
+  min-height: 36px;
+  padding: 4px 10px;
+  border: 1px solid var(--baseline);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.compare-scores {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.compare-scores b {
+  display: block;
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.compare-scores span,
+.hour-who {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.compare-title {
+  margin: 18px 0 8px;
+  font-size: 15px;
+}
+
+.versus {
+  display: grid;
+  grid-template-columns: 64px 1fr auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--grid);
+  font-variant-numeric: tabular-nums;
+}
+
+.versus span {
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.versus b:last-child {
+  text-align: right;
+}
+
+.versus i {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.hour-who {
+  margin: 10px 0 4px;
+}
+
 @media (max-width: 480px) {
   .topbar {
     flex-wrap: wrap;
@@ -1213,6 +1382,23 @@ dialog h2 {
 
   .taste-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stat-row.three .stat b {
+    font-size: 17px;
+  }
+
+  .now-card {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .now-listen {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .now-listen .listen-links {
+    justify-content: flex-start;
   }
 
   .fader-labels {
@@ -1388,4 +1574,9 @@ dialog h2 {
   from {
     transform: scaleY(0);
   }
+}
+
+.more {
+  display: block;
+  margin: 8px auto 0;
 }

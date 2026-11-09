@@ -126,7 +126,6 @@ export function buildOverview(db, { week, now, tzOffsetMinutes, groupId = null }
       id: member.id,
       name: member.name,
       service: member.service,
-      lastfmUser: member.lastfm_user,
       lastSyncedAt: member.last_synced_at,
       error: member.last_error,
       ...summarize(own),

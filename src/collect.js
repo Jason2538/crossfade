@@ -24,6 +24,7 @@ import { createClient } from './lastfm.js';
 import { createRelayClient } from './relay.js';
 import { MAX_WEEKS_BACK, registerMember, saveSpotifyLogin, SpotifyGroupFull } from './server.js';
 import { createSpotifyClient } from './spotify.js';
+import { buildSocial } from './social.js';
 import { buildMemberDetail, buildOverview } from './stats.js';
 import { syncAll } from './sync.js';
 import { nowSeconds } from './time.js';
@@ -50,6 +51,7 @@ export function buildSnapshot(db, groupId, { now, tzOffsetMinutes, liveKey = nul
     generatedAt: now,
     liveTokens: liveKey ? Object.fromEntries(targets.map(([id, target]) => [id, sealLiveToken(target, liveKey)])) : {},
     notices: listNotices(db, groupId, now - NOTICE_SECONDS),
+    social: buildSocial(db, groupId, { now, tzOffsetMinutes }),
     overview: weeks.map((week) => buildOverview(db, { week, now, tzOffsetMinutes, groupId })),
     members: Object.fromEntries(
       listMembers(db, groupId).map((member) => [

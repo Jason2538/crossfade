@@ -189,7 +189,8 @@ test('친구를 추가하면 기록을 가져와 통계에 나타난다', async 
 
   const response = await fetch(`${appUrl}/api/overview`, { headers: { Cookie: cookie } });
   const overview = await response.json();
-  const buddy = overview.members.find((m) => m.lastfmUser === 'buddy');
+  const buddy = overview.members.find((m) => m.id === member.id);
+  assert.equal(buddy.lastfmUser, undefined, 'Last.fm 이름은 화면 데이터에 넣지 않는다');
   assert.equal(buddy.nowPlaying.track, 'Live');
   assert.equal(buddy.lastPlayed.track, 'Tune');
   assert.ok(requests.some((r) => r.method === 'track.getInfo'));
