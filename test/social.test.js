@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import vm from 'node:vm';
 import { addMember, insertScrobbles, openDb } from '../src/db.js';
 import { buildSocial } from '../src/social.js';
 
@@ -26,6 +28,8 @@ test('오늘·이번 주·이번 달을 따로 세고, 연속으로 들은 날�
 
   const social = buildSocial(db, null, { now: NOW, tzOffsetMinutes: KST });
   assert.equal(social.members[a].today.plays, 1);
+  assert.equal(social.members[a].yesterday.plays, 1);
+  assert.equal(social.members[b].yesterday.plays, 1);
   assert.equal(social.members[a].week.plays, 1, '월요일이라 이번 주는 오늘뿐');
   assert.equal(social.members[a].month.plays, 3, '열흘 전은 지난달');
   assert.equal(social.members[a].last30.plays, 4);
@@ -64,4 +68,22 @@ test('궁합에는 아티스트와 듣는 시간대 점수가 함께 들어간�
   assert.equal(pair.score, 100);
   assert.ok(pair.hourScore > 0);
   assert.deepEqual(pair.sharedArtists, ['Same']);
+});
+
+test('알림 문구는 오전에는 어제, 오후에는 오늘 기록으로 만든다', () => {
+  const context = vm.createContext({ self: { addEventListener() {} } });
+  vm.runInContext(readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8'), context);
+  const snapshot = {
+    social: {
+      members: {
+        1: { today: { minutes: 65, plays: 12 }, yesterday: { minutes: 30, plays: 9 } },
+        2: { today: { minutes: 1200, plays: 300 }, yesterday: { minutes: 10, plays: 3 } },
+      },
+    },
+  };
+  const evening = context.dailyMessage(snapshot, 1, 21);
+  assert.equal(evening.title, '크로스페이드 · 오늘의 기록');
+  assert.equal(evening.body, '나는 오늘 12번, 1시간 5분 들었어요.\n우리는 오늘 모두 1,265분 들었어요.');
+  const morning = context.dailyMessage(snapshot, null, 8);
+  assert.equal(morning.body, '우리는 어제 모두 40분 들었어요.');
 });

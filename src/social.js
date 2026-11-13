@@ -66,6 +66,7 @@ export function buildSocial(db, groupId, { now, tzOffsetMinutes }) {
         member.id,
         {
           today: brief(between(own, today)),
+          yesterday: brief(between(own, today - DAY, today)),
           week: brief(between(own, week.start)),
           month: brief(between(own, monthStart)),
           last30: brief(recent),

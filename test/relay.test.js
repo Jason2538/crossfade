@@ -238,7 +238,58 @@ test('Spotify 친구의 지금 듣는 곡은 access token만으로 바로 읽는
   assert.equal(body.nowPlaying.track, 'Now');
   assert.equal(body.lastPlayed.track, 'Before');
   assert.equal(expired.status, 502);
-  assert.deepEqual(idle, { nowPlaying: null, lastPlayed: null });
+  assert.deepEqual(idle, { nowPlaying: null, lastPlayed: null, recent: [] });
+  assert.equal(body.recent[0].track, 'Before');
+});
+
+test('알림은 알려진 푸시 주소만 받고, 정한 시각에 하루 한 번만 보낸다', async () => {
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const env = {
+    ...fakeEnv(),
+    VAPID_PRIVATE_JWK: JSON.stringify(await crypto.subtle.exportKey('jwk', pair.privateKey)),
+    VAPID_PUBLIC_KEY: 'public-key',
+  };
+  const post = (body, origin = ORIGIN) => call(env, '/push', { method: 'POST', origin, body: JSON.stringify(body) });
+  const endpoint = 'https://fcm.googleapis.com/fcm/send/device-1';
+
+  assert.equal((await (await call(env, '/push')).json()).key, 'public-key');
+  assert.equal((await post({ endpoint, hour: 21 }, 'https://evil.example')).status, 403);
+  assert.equal((await post({ endpoint: 'https://evil.example/hook', hour: 21 })).status, 400);
+  assert.equal((await post({ endpoint, hour: 24 })).status, 400);
+  assert.equal((await post({ endpoint, hour: 21 })).status, 200);
+  assert.equal((await post({ endpoint: 'https://web.push.apple.com/gone', hour: 21 })).status, 200);
+
+  const realFetch = globalThis.fetch;
+  const sent = [];
+  globalThis.fetch = async (url, options) => {
+    sent.push({ url, options });
+    return new Response(null, { status: String(url).includes('gone') ? 410 : 201 });
+  };
+  const tick = async (iso) => {
+    const pending = [];
+    worker.scheduled({ scheduledTime: Date.parse(iso) }, env, { waitUntil: (p) => pending.push(p) });
+    await Promise.all(pending);
+  };
+  // 한국 시간 20시에는 보내지 않고, 21시에 한 번만 보냅니다.
+  await tick('2026-11-13T11:00:00Z');
+  assert.equal(sent.length, 0);
+  await tick('2026-11-13T12:00:00Z');
+  await tick('2026-11-13T12:15:00Z');
+  globalThis.fetch = realFetch;
+
+  assert.deepEqual(sent.map((item) => item.url).sort(), [endpoint, 'https://web.push.apple.com/gone'].sort());
+  const [, token, signature] = sent.find((item) => item.url === endpoint).options.headers.Authorization.match(/^vapid t=(.+)\.([\w-]+), k=public-key$/);
+  const fromBase64Url = (text) => Buffer.from(text, 'base64url');
+  assert.equal(JSON.parse(fromBase64Url(token.split('.')[1])).aud, 'https://fcm.googleapis.com');
+  assert.equal(
+    await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pair.publicKey, fromBase64Url(signature), new TextEncoder().encode(token)),
+    true,
+  );
+  const left = [...env.store.keys()].filter((key) => key.startsWith('push:'));
+  assert.equal(left.length, 1, '끊긴 기기는 지운다');
+
+  assert.equal((await post({ endpoint, remove: true })).status, 200);
+  assert.equal([...env.store.keys()].some((key) => key.startsWith('push:')), false);
 });
 
 test('수집 시작에 실패해도 요청은 대기열에 남는다', async () => {

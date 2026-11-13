@@ -1615,3 +1615,24 @@ dialog h2 {
   color: var(--critical);
   font-size: 13px;
 }
+
+.field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--fill);
+  color: var(--ink);
+  font: inherit;
+}
+
+.dialog-note {
+  margin-bottom: 14px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.form-actions {
+  flex-wrap: wrap;
+}

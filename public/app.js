@@ -1,3 +1,4 @@
+import { disablePush, enablePush, pushSupported, savedPush, syncPush, testPush } from './notify.js';
 import { groupFileId, openSnapshot } from './snapshot.js';
 import {
   fetchLive,
@@ -19,6 +20,9 @@ const COLLECT_WATCH_MS = 15_000;
 const COLLECT_WATCH_TRIES = 40;
 // 수집이 이보다 오래 멈췄다면 "지금 듣는 중"은 더 이상 지금이 아닙니다.
 const NOW_PLAYING_TTL_SECONDS = 30 * 60;
+// 길이를 모르는 곡은 수집기(src/stats.js)와 같은 값으로 계산합니다.
+const ESTIMATED_TRACK_SECONDS = 210;
+const DEFAULT_NOTIFY_HOUR = 21;
 const CODE_STORAGE_KEY = 'crossfade.inviteCode';
 const PENDING_STORAGE_KEY = 'crossfade.pendingGroup';
 const CODE_LETTERS = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -206,6 +210,7 @@ async function unlockWithCode(code) {
     throw invalidCode('초대 코드가 맞지 않아요.');
   }
   rememberCode(code);
+  syncPush(code);
 }
 
 async function loadSession() {
@@ -352,13 +357,62 @@ function hideStaleNowPlaying(data) {
   return { ...data, members: data.members.map((member) => ({ ...member, nowPlaying: null })) };
 }
 
-function withLive(data) {
+const playSeconds = (plays) => plays.reduce((sum, play) => sum + (play.durationSec ?? ESTIMATED_TRACK_SECONDS), 0);
+
+// 마지막 수집 뒤에 들은 곡입니다. 다음 수집 전까지 통계에 미리 더합니다.
+function freshPlays(memberId) {
+  const live = state.live.get(memberId);
+  if (!state.snapshot || !live?.recent || Date.now() - live.at > LIVE_MAX_AGE_MS) return [];
+  const collected = state.snapshot.overview[0].members.find((member) => member.id === memberId);
+  const since = collected?.lastPlayed?.played_at ?? state.snapshot.generatedAt;
+  return live.recent.filter((play) => play.played_at > since);
+}
+
+const addPlays = (stat, plays) => ({
+  minutes: stat.minutes + Math.round(playSeconds(plays) / 60),
+  plays: stat.plays + plays.length,
+});
+
+function withLive(data, week) {
+  let fresh = [];
   const members = data.members.map((member) => {
     const live = state.live.get(member.id);
     if (!live || Date.now() - live.at > LIVE_MAX_AGE_MS) return member;
-    return { ...member, nowPlaying: live.nowPlaying, lastPlayed: live.lastPlayed ?? member.lastPlayed };
+    const mine = week === 0 ? freshPlays(member.id) : [];
+    fresh = fresh.concat(mine);
+    return { ...member, ...addPlays(member, mine), nowPlaying: live.nowPlaying, lastPlayed: live.lastPlayed ?? member.lastPlayed };
   });
-  return { ...data, members };
+  members.sort((a, b) => b.minutes - a.minutes || b.plays - a.plays || a.id - b.id);
+  return { ...data, members, group: { ...data.group, ...addPlays(data.group, fresh) } };
+}
+
+function liveSocial() {
+  const social = state.snapshot?.social;
+  if (!social) return null;
+  const activity = [];
+  const members = Object.fromEntries(
+    Object.entries(social.members).map(([id, stat]) => {
+      const fresh = freshPlays(Number(id));
+      if (!fresh.length) return [id, stat];
+      const extra = Math.round(playSeconds(fresh) / 60);
+      for (const play of fresh) activity.push({ memberId: Number(id), track: play.track, artist: play.artist, image: play.image, playedAt: play.played_at });
+      return [
+        id,
+        {
+          ...stat,
+          today: addPlays(stat.today, fresh),
+          week: addPlays(stat.week, fresh),
+          month: addPlays(stat.month, fresh),
+          last30: addPlays(stat.last30, fresh),
+          streak: stat.today.plays ? stat.streak : stat.streak + 1,
+          days7: stat.days7.map((minutes, index) => (index === 6 ? minutes + extra : minutes)),
+          weeks4: stat.weeks4.map((minutes, index) => (index === 3 ? minutes + extra : minutes)),
+        },
+      ];
+    }),
+  );
+  activity.sort((a, b) => b.playedAt - a.playedAt);
+  return { ...social, members, activity: [...activity, ...social.activity] };
 }
 
 // 지금 듣는 곡은 수집과 상관없이 바로 바꿉니다.
@@ -373,11 +427,11 @@ async function pollLive() {
     changed ||= JSON.stringify([before?.nowPlaying, before?.lastPlayed]) !== JSON.stringify([live.nowPlaying, live.lastPlayed]);
     state.live.set(id, { ...live, at: Date.now() });
   }
-  if (changed && state.view?.startsWith('home:')) render();
+  if (changed && /^(home|member):/.test(state.view ?? '')) render();
 }
 
 async function readOverview(week) {
-  if (state.snapshot) return withLive(hideStaleNowPlaying(state.snapshot.overview[week]));
+  if (state.snapshot) return withLive(hideStaleNowPlaying(state.snapshot.overview[week]), week);
   return api(`/api/overview?week=${week}`);
 }
 
@@ -385,7 +439,13 @@ async function readMember(id, week) {
   if (!state.snapshot) return api(`/api/member?id=${id}&week=${week}`);
   const detail = state.snapshot.members[id]?.[week];
   if (!detail) throw new Error('친구를 찾을 수 없어요.');
-  return detail;
+  const fresh = week === 0 ? freshPlays(Number(id)) : [];
+  if (!fresh.length) return detail;
+  return {
+    ...detail,
+    ...addPlays(detail, fresh),
+    recent: [...fresh.map((play) => ({ track: play.track, artist: play.artist, image: play.image, playedAt: play.played_at })), ...detail.recent],
+  };
 }
 
 const number = (value) => value.toLocaleString('ko-KR');
@@ -903,7 +963,7 @@ function compareSection(member, data, social) {
 }
 
 function memberSocial(id, data, current) {
-  const social = state.snapshot?.social;
+  const social = liveSocial();
   const mine = social?.members[id];
   if (!mine) return null;
   const today = new Date();
@@ -1035,7 +1095,7 @@ function emptyHome() {
 async function renderHome() {
   const data = await readOverview(state.week);
   const { group, members, week } = data;
-  const social = state.snapshot?.social ?? null;
+  const social = liveSocial();
   const changeWeek = (offset) => {
     state.week = offset;
     render();
@@ -1085,6 +1145,7 @@ async function renderHome() {
         ? el(
             'p',
             { class: 'footnote footer-links' },
+            state.connect ? el('button', { class: 'link-button', type: 'button', onclick: openNotifyDialog }, '알림 설정') : null,
             el('button', { class: 'link-button', type: 'button', onclick: leaveGroup }, '다른 그룹으로 이동'),
             el('a', { class: 'link-button', href: '#/admin' }, '관리자'),
           )
@@ -1614,6 +1675,100 @@ function openAddDialog() {
   );
 
   const dialog = el('dialog', { onclose: () => dialog.remove() }, form);
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+function openNotifyDialog() {
+  const saved = savedPush();
+  const error = el('p', { class: 'form-error', role: 'alert' });
+  const members = state.snapshot.overview[0].members;
+  const who = el(
+    'select',
+    { name: 'member' },
+    el('option', { value: '' }, '선택 안 함 (우리 기록만)'),
+    members.map((member) => el('option', { value: member.id, selected: member.id === saved?.memberId }, member.name)),
+  );
+  const hour = el(
+    'select',
+    { name: 'hour' },
+    Array.from({ length: 24 }, (_, value) =>
+      el('option', { value, selected: value === (saved?.hour ?? DEFAULT_NOTIFY_HOUR) }, `${value}시`),
+    ),
+  );
+  const finish = (message) => {
+    state.flash = message;
+    dialog.close();
+    render();
+  };
+  const run = (button, task) => async () => {
+    button.disabled = true;
+    error.textContent = '';
+    try {
+      await task();
+    } catch (failure) {
+      error.textContent = failure.message;
+      button.disabled = false;
+    }
+  };
+  const save = el('button', { class: 'btn primary', type: 'button' }, saved ? '저장' : '알림 켜기');
+  save.addEventListener(
+    'click',
+    run(save, async () => {
+      const settings = { code: state.snapshotCode, memberId: who.value ? Number(who.value) : null, hour: Number(hour.value) };
+      await enablePush(state.connect, settings);
+      finish(`알림을 켰어요. 매일 ${settings.hour}시쯤 알려 드릴게요.`);
+    }),
+  );
+  const off = el('button', { class: 'btn danger', type: 'button' }, '알림 끄기');
+  off.addEventListener(
+    'click',
+    run(off, async () => {
+      await disablePush(state.connect);
+      finish('알림을 껐어요.');
+    }),
+  );
+  const test = el('button', { class: 'btn', type: 'button' }, '지금 한 번 받아 보기');
+  test.addEventListener(
+    'click',
+    run(test, async () => {
+      await testPush();
+      test.disabled = false;
+    }),
+  );
+  const needsInstall = /iPhone|iPad|iPod/.test(navigator.userAgent) && !navigator.standalone;
+
+  const dialog = el(
+    'dialog',
+    { onclose: () => dialog.remove() },
+    el('h2', {}, '하루 한 번 알림'),
+    pushSupported()
+      ? [
+          el('p', { class: 'dialog-note' }, '매일 정한 시각에 내가 몇 번, 얼마나 들었는지와 우리가 모두 몇 분 들었는지 알려 드려요.'),
+          el('label', { class: 'field' }, el('span', {}, '나는 누구인가요'), who),
+          el('label', { class: 'field' }, el('span', {}, '받을 시각 (한국 시간)'), hour),
+          el(
+            'p',
+            { class: 'dialog-note' },
+            '오전으로 정하면 어제 기록을, 오후로 정하면 오늘 지금까지의 기록을 알려 드려요. 알림은 이 기기에만 오고, 정한 시각부터 15분 안에 와요.',
+          ),
+          needsInstall
+            ? el('p', { class: 'dialog-note' }, '아이폰과 아이패드는 공유 → 홈 화면에 추가로 설치한 뒤, 그 앱에서 켜야 알림이 와요.')
+            : null,
+          error,
+        ]
+      : el(
+          'p',
+          { class: 'dialog-note' },
+          '이 브라우저는 알림을 지원하지 않아요. 아이폰과 아이패드는 공유 → 홈 화면에 추가로 설치한 뒤, 그 앱에서 다시 열어 주세요.',
+        ),
+    el(
+      'div',
+      { class: 'form-actions' },
+      el('button', { class: 'btn', type: 'button', onclick: () => dialog.close() }, '닫기'),
+      pushSupported() ? [saved ? [test, off] : null, save] : null,
+    ),
+  );
   document.body.append(dialog);
   dialog.showModal();
 }

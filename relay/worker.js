@@ -12,17 +12,34 @@ const LIVE_CACHE_SECONDS = 25;
 const LASTFM_PLACEHOLDER_IMAGE = '2a96cbd8b46e442fc41c2b86b821562f';
 const COLLECT_KEY = 'collect';
 const COLLECT_GAP_SECONDS = 360;
+// 수집 사이에 들은 곡을 사이트가 미리 더할 수 있게 최근 곡을 함께 돌려줍니다.
+const LIVE_RECENT_LIMIT = 30;
+const PUSH_PREFIX = 'push:';
+const PUSH_LIMIT = 300;
+const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|push\.apple\.com|push\.services\.mozilla\.com|notify\.windows\.com)$/;
+const PUSH_TTL_SECONDS = 12 * 3600;
+const KST_OFFSET_MS = 9 * 3600_000;
 
 const json = (body, status, headers) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
 
 const hasKey = (request, key) => Boolean(key) && request.headers.get('Authorization') === `Bearer ${key}`;
 
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+const base64Url = (bytes) =>
+  btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
 // 주소를 그대로 저장하지 않으려고 해시만 남깁니다.
 async function isOverLimit(request, env) {
   const address = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(address));
-  const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  const hash = await sha256Hex(address);
   const key = `${RATE_PREFIX}${new Date().toISOString().slice(0, 10)}:${hash}`;
   const count = Number(await env.LOGINS.get(key)) || 0;
   if (count >= DAILY_LIMIT) return true;
@@ -95,7 +112,7 @@ async function fetchLive(user, env) {
   const params = new URLSearchParams({
     method: 'user.getrecenttracks',
     user,
-    limit: '1',
+    limit: String(LIVE_RECENT_LIMIT),
     format: 'json',
     api_key: env.LASTFM_API_KEY,
   });
@@ -103,11 +120,10 @@ async function fetchLive(user, env) {
   if (!response.ok) return null;
   const items = [(await response.json()).recenttracks?.track ?? []].flat();
   const playing = items.find((item) => item['@attr']?.nowplaying === 'true');
-  const last = items.find((item) => item.date?.uts);
-  return {
-    nowPlaying: playing ? liveTrack(playing) : null,
-    lastPlayed: last ? { ...liveTrack(last), played_at: Number(last.date.uts) } : null,
-  };
+  const recent = items
+    .filter((item) => item.date?.uts)
+    .map((item) => ({ ...liveTrack(item), played_at: Number(item.date.uts), durationSec: null }));
+  return { nowPlaying: playing ? liveTrack(playing) : null, lastPlayed: recent[0] ?? null, recent };
 }
 
 function spotifyTrack(item) {
@@ -122,14 +138,21 @@ function spotifyTrack(item) {
 // 토큰이 끝났으면 null 을 돌려주고, 사이트는 수집한 값을 그대로 보여 줍니다.
 async function fetchSpotifyLive(token) {
   const api = (path) => fetch(`https://api.spotify.com/v1${path}`, { headers: { Authorization: `Bearer ${token}` } });
-  const [current, recent] = await Promise.all([api('/me/player/currently-playing'), api('/me/player/recently-played?limit=1')]);
+  const [current, recent] = await Promise.all([api('/me/player/currently-playing'), api(`/me/player/recently-played?limit=${LIVE_RECENT_LIMIT}`)]);
   if (!current.ok || !recent.ok) return null;
   const playing = current.status === 204 ? null : await current.json();
-  const last = (await recent.json()).items?.[0];
+  const plays = ((await recent.json()).items ?? [])
+    .map(({ track, played_at: playedAt }) => ({
+      ...spotifyTrack(track ?? {}),
+      played_at: Math.floor(Date.parse(playedAt) / 1000),
+      durationSec: track?.duration_ms ? Math.round(track.duration_ms / 1000) : null,
+    }))
+    .filter((item) => item.artist && item.track && item.played_at);
   return {
     // 팟캐스트나 일시정지 상태는 재생 중인 곡으로 보지 않습니다.
     nowPlaying: playing?.is_playing && playing.item?.type === 'track' ? spotifyTrack(playing.item) : null,
-    lastPlayed: last ? { ...spotifyTrack(last.track ?? {}), played_at: Math.floor(Date.parse(last.played_at) / 1000) } : null,
+    lastPlayed: plays[0] ?? null,
+    recent: plays,
   };
 }
 
@@ -155,9 +178,90 @@ async function liveResponse(request, env, url, cors) {
   return response;
 }
 
+// 알림을 받을 기기의 푸시 주소와 받을 시각만 저장합니다. 누구인지는 저장하지 않습니다.
+async function savePush(request, env) {
+  let body;
+  try {
+    body = JSON.parse(await request.text());
+  } catch {
+    body = null;
+  }
+  let host = '';
+  try {
+    const target = new URL(body?.endpoint);
+    if (target.protocol === 'https:' && String(body.endpoint).length <= 1000) host = target.hostname;
+  } catch {
+    host = '';
+  }
+  // 아무 주소로나 요청을 보내게 만들 수 없도록 알려진 푸시 서비스만 받습니다.
+  if (!PUSH_HOSTS.test(host)) return { status: 400, body: { error: 'bad endpoint' } };
+  const key = `${PUSH_PREFIX}${await sha256Hex(body.endpoint)}`;
+  if (body.remove) {
+    await env.LOGINS.delete(key);
+    return { status: 200, body: { saved: false } };
+  }
+  if (!Number.isInteger(body.hour) || body.hour < 0 || body.hour > 23) return { status: 400, body: { error: 'bad hour' } };
+  if (await isOverLimit(request, env)) return { status: 429, body: { error: 'too many requests' } };
+  const existing = JSON.parse((await env.LOGINS.get(key)) ?? 'null');
+  const { keys } = await env.LOGINS.list({ prefix: PUSH_PREFIX });
+  if (!existing && keys.length >= PUSH_LIMIT) return { status: 429, body: { error: 'full' } };
+  await env.LOGINS.put(key, JSON.stringify({ endpoint: body.endpoint, hour: body.hour, sentOn: existing?.sentOn ?? null }));
+  return { status: 200, body: { saved: true } };
+}
+
+// 내용 없는 푸시입니다. 받은 기기의 서비스 워커가 기록을 직접 읽어 알림을 만듭니다.
+async function sendPush(endpoint, env) {
+  const key = await crypto.subtle.importKey(
+    'jwk',
+    JSON.parse(env.VAPID_PRIVATE_JWK),
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign'],
+  );
+  const encode = (value) => base64Url(new TextEncoder().encode(JSON.stringify(value)));
+  const claims = {
+    aud: new URL(endpoint).origin,
+    exp: Math.floor(Date.now() / 1000) + PUSH_TTL_SECONDS,
+    sub: `${env.ALLOWED_ORIGIN}/`,
+  };
+  const unsigned = `${encode({ typ: 'JWT', alg: 'ES256' })}.${encode(claims)}`;
+  const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(unsigned));
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      TTL: String(PUSH_TTL_SECONDS),
+      Urgency: 'normal',
+      Authorization: `vapid t=${unsigned}.${base64Url(signature)}, k=${env.VAPID_PUBLIC_KEY}`,
+    },
+  });
+  return response.status;
+}
+
+// 정한 시각(한국 시간)이 되면 하루에 한 번만 보냅니다.
+async function sendDaily(env, nowMs) {
+  if (!env.VAPID_PRIVATE_JWK || !env.VAPID_PUBLIC_KEY) return;
+  const local = new Date(nowMs + KST_OFFSET_MS);
+  const hour = local.getUTCHours();
+  const day = local.toISOString().slice(0, 10);
+  const { keys } = await env.LOGINS.list({ prefix: PUSH_PREFIX });
+  for (const { name } of keys) {
+    const record = JSON.parse((await env.LOGINS.get(name)) ?? 'null');
+    if (!record || record.hour !== hour || record.sentOn === day) continue;
+    try {
+      const status = await sendPush(record.endpoint, env);
+      // 알림을 끄거나 앱을 지운 기기입니다.
+      if (status === 404 || status === 410) await env.LOGINS.delete(name);
+      else if (status < 300) await env.LOGINS.put(name, JSON.stringify({ ...record, sentOn: day }));
+      else console.error('알림 전송 실패:', status);
+    } catch (error) {
+      console.error('알림 전송 실패:', error.message);
+    }
+  }
+}
+
 export default {
-  scheduled(_event, env, ctx) {
-    ctx.waitUntil(startCollection(env));
+  scheduled(event, env, ctx) {
+    ctx.waitUntil(Promise.all([startCollection(env), sendDaily(env, event.scheduledTime ?? Date.now())]));
   },
 
   async fetch(request, env) {
@@ -189,6 +293,14 @@ export default {
     }
 
     if (url.pathname === '/now' && request.method === 'GET') return liveResponse(request, env, url, cors);
+
+    if (url.pathname === '/push' && request.method === 'GET') return json({ key: env.VAPID_PUBLIC_KEY ?? null }, 200, cors);
+
+    if (url.pathname === '/push' && request.method === 'POST') {
+      if (request.headers.get('Origin') !== env.ALLOWED_ORIGIN) return json({ error: 'forbidden' }, 403, cors);
+      const result = await savePush(request, env);
+      return json(result.body, result.status, cors);
+    }
 
     if (url.pathname === '/collect' && request.method === 'POST') {
       if (request.headers.get('Origin') !== env.ALLOWED_ORIGIN) return json({ error: 'forbidden' }, 403, cors);

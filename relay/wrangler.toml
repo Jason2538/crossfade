@@ -5,6 +5,7 @@ compatibility_date = "2026-10-01"
 [vars]
 ALLOWED_ORIGIN = "https://jason2538.github.io"
 GITHUB_REPO = "Jason2538/crossfade"
+VAPID_PUBLIC_KEY = "BIPdKRuKDggETtxCkcbK_5Q9IuMCtaHyARIU1uDsiWz-2ycGzcb4Fek5s8A3tZJHzj5q5svOWjq7kl_jotRO4bI"
 
 [triggers]
 crons = ["*/15 * * * *"]
