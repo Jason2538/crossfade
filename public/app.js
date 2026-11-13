@@ -25,6 +25,8 @@ const ESTIMATED_TRACK_SECONDS = 210;
 const DEFAULT_NOTIFY_HOUR = 21;
 const CODE_STORAGE_KEY = 'crossfade.inviteCode';
 const PENDING_STORAGE_KEY = 'crossfade.pendingGroup';
+// 새 그룹이 열리기를 기다리는 동안 확인하는 간격입니다.
+const WAITING_REFRESH_MS = 15_000;
 const CODE_LETTERS = 'abcdefghjkmnpqrstuvwxyz23456789';
 const QUEUED_MESSAGE = '요청을 보냈어요. 다음 수집 때(15분쯤) 반영돼요.';
 const SERVICE_NAMES = { spotify: 'Spotify', apple: 'Apple Music' };
@@ -202,7 +204,11 @@ function invalidCode(message) {
 
 async function unlockWithCode(code) {
   const sealed = await fetchSealed(code);
-  if (sealed === 'missing') throw invalidCode('코드가 맞지 않거나, 아직 준비 중인 새 그룹이에요.');
+  if (sealed === 'missing') {
+    const error = invalidCode('코드가 맞지 않거나, 아직 준비 중인 새 그룹이에요.');
+    error.missing = true;
+    throw error;
+  }
   if (!sealed) throw new Error('기록을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
   try {
     await unlock(sealed, code);
@@ -222,14 +228,20 @@ async function loadSession() {
   state.pendingCode = savedPending();
   const session = { demo: false, spotifyLogin: false, static: true, authed: false };
   const saved = savedCode();
+  let waiting = false;
   for (const code of [state.invite, saved]) {
-    if (!code || session.authed) continue;
+    if (!code || session.authed || waiting) continue;
     try {
       await unlockWithCode(code);
       session.authed = true;
     } catch (failure) {
-      if (code === state.invite) state.gateError = failure.message;
-      else if (failure.invalid) rememberCode(null);
+      if (code !== state.invite) {
+        if (failure.invalid) rememberCode(null);
+      } else if (failure.missing) {
+        // 방금 만든 그룹의 초대 링크일 수 있습니다. 열릴 때까지 기다립니다.
+        rememberPending(code);
+        waiting = true;
+      } else state.gateError = failure.message;
     }
   }
   // 만들고 있는 새 그룹이 없으면 코드 없이 공개 그룹으로 바로 들어옵니다.
@@ -252,6 +264,8 @@ async function createGroup(error) {
     const code = createCode();
     await sendToCollector(state.connect, { kind: 'group', code });
     rememberPending(code);
+    // 15분을 기다리지 않도록 수집을 바로 시작합니다.
+    requestCollection(state.connect);
     render();
   } catch (failure) {
     error.textContent = failure.message;
@@ -278,23 +292,89 @@ async function completeSpotifyLogin() {
   }
 }
 
-async function shareInviteLink(event, code = state.snapshotCode) {
-  const button = event.currentTarget;
-  const hash = code === state.openCode ? '' : `#invite=${encodeURIComponent(code)}`;
-  const url = `${location.origin}${location.pathname}${hash}`;
+// 사이트가 열려 있는 상태에서 초대 링크를 연 경우입니다.
+async function joinInvited(code) {
   try {
-    if (navigator.share) {
-      await navigator.share({ title: '크로스페이드 초대', url });
-      return;
-    }
-    await navigator.clipboard.writeText(url);
-    button.textContent = '복사했어요';
-    setTimeout(() => {
-      button.textContent = '초대 링크';
-    }, 1500);
+    await unlockWithCode(code);
+    state.session.authed = true;
+    state.flash = '초대받은 그룹으로 들어왔어요.';
   } catch (failure) {
-    if (failure.name !== 'AbortError') prompt('이 링크를 복사해 친구에게 보내 주세요.', url);
+    if (failure.missing) {
+      rememberPending(code);
+      state.snapshot = null;
+      state.session.authed = false;
+    } else if (state.session.authed) state.flash = failure.message;
+    else state.gateError = failure.message;
   }
+}
+
+function inviteUrl(code) {
+  const hash = code === state.openCode ? '' : `#invite=${encodeURIComponent(code)}`;
+  return `${location.origin}${location.pathname}${hash}`;
+}
+
+function openInviteDialog(code = state.snapshotCode) {
+  const url = inviteUrl(code);
+  const open = code === state.openCode;
+  const status = el('p', { class: 'form-status', role: 'status' });
+  const link = el('input', { type: 'text', name: 'link', readonly: true, value: url, onfocus: () => link.select() });
+  const copy = el(
+    'button',
+    {
+      class: 'btn primary',
+      type: 'button',
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          status.textContent = '링크를 복사했어요. 친구에게 붙여 넣어 보내 주세요.';
+        } catch {
+          link.select();
+          status.textContent = document.execCommand?.('copy')
+            ? '링크를 복사했어요. 친구에게 붙여 넣어 보내 주세요.'
+            : '복사하지 못했어요. 위 링크를 길게 눌러 복사해 주세요.';
+        }
+      },
+    },
+    '링크 복사',
+  );
+  const share = navigator.share
+    ? el(
+        'button',
+        {
+          class: 'btn',
+          type: 'button',
+          onclick: () => navigator.share({ title: '크로스페이드 초대', url }).catch(() => {}),
+        },
+        '공유하기',
+      )
+    : null;
+  const dialog = el(
+    'dialog',
+    { onclose: () => dialog.remove() },
+    el('h2', {}, '친구 초대'),
+    el('p', { class: 'dialog-note' }, '이 링크를 받은 친구는 누르기만 하면 바로 들어와요.'),
+    el('label', { class: 'field' }, el('span', {}, '초대 링크'), link),
+    open
+      ? null
+      : [
+          el(
+            'p',
+            { class: 'dialog-note' },
+            '홈 화면에 추가한 앱에서는 링크가 이어지지 않아요. 그때는 맨 아래 "다른 그룹으로 이동"을 누르고 이 코드를 입력하면 돼요.',
+          ),
+          el('p', { class: 'group-code' }, code),
+        ],
+    status,
+    el(
+      'div',
+      { class: 'form-actions' },
+      el('button', { class: 'btn', type: 'button', onclick: () => dialog.close() }, '닫기'),
+      share,
+      copy,
+    ),
+  );
+  document.body.append(dialog);
+  dialog.showModal();
 }
 
 async function reloadSnapshot() {
@@ -505,7 +585,7 @@ function header() {
         },
         el('span', { class: 'refresh-icon', 'aria-hidden': 'true' }, '↻'),
       ),
-      state.session.static ? el('button', { class: 'btn', type: 'button', onclick: shareInviteLink }, '초대 링크') : null,
+      state.session.static ? el('button', { class: 'btn', type: 'button', onclick: () => openInviteDialog() }, '초대 링크') : null,
       el('button', { class: 'btn primary', type: 'button', onclick: openAddDialog }, '친구 추가'),
     ),
   );
@@ -1491,10 +1571,10 @@ function renderWaiting() {
         'div',
         { class: 'card gate-card' },
         el('span', { class: 'eq large', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')),
-        el('h1', {}, '새 그룹을 만들고 있어요'),
-        el('p', {}, '다음 수집 때(15분쯤) 자동으로 열려요. 그동안 이 코드를 저장해 두세요.'),
+        el('h1', {}, '그룹을 준비하고 있어요'),
+        el('p', {}, '새로 만든 그룹은 보통 1~2분, 길면 15분 안에 자동으로 열려요. 그동안 이 코드를 저장해 두세요.'),
         el('p', { class: 'group-code' }, code),
-        el('button', { class: 'btn primary', type: 'button', onclick: (event) => shareInviteLink(event, code) }, '초대 링크'),
+        el('button', { class: 'btn primary', type: 'button', onclick: () => openInviteDialog(code) }, '초대 링크'),
         el(
           'button',
           {
@@ -1528,8 +1608,14 @@ function renderGate() {
           onsubmit: async (event) => {
             event.preventDefault();
             try {
-              if (state.session.static) await unlockWithCode(input.value.trim().toLowerCase());
-              else await api('/api/session', { method: 'POST', body: JSON.stringify({ code: input.value }) });
+              if (state.session.static) {
+                const typed = input.value.trim();
+                // 만든 코드는 모두 소문자입니다. 대문자로 입력해도 들어가게 합니다.
+                await unlockWithCode(typed).catch((failure) => {
+                  if (!failure.invalid || typed === typed.toLowerCase()) throw failure;
+                  return unlockWithCode(typed.toLowerCase());
+                });
+              } else await api('/api/session', { method: 'POST', body: JSON.stringify({ code: input.value }) });
               state.session.authed = true;
               render();
             } catch (failure) {
@@ -1827,7 +1913,7 @@ async function render() {
         rememberPending(null);
         state.session.authed = true;
       } catch {
-        state.refreshTimer = setTimeout(render, REFRESH_MS);
+        state.refreshTimer = setTimeout(render, WAITING_REFRESH_MS);
         return renderWaiting();
       }
     }
@@ -1847,7 +1933,10 @@ async function render() {
   }
 }
 
-window.addEventListener('hashchange', () => {
+window.addEventListener('hashchange', async () => {
+  const invited = takeInviteCode();
+  if (invited && state.session?.static) await joinInvited(invited);
+  else if (invited) state.invite = invited;
   window.scrollTo(0, 0);
   render();
 });

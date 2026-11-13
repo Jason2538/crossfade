@@ -1096,7 +1096,7 @@ fieldset.field {
   margin-top: 8px;
 }
 
-.gate-card .group-code {
+.group-code {
   margin-bottom: 16px;
   color: var(--ink);
   font-size: 18px;
@@ -1635,4 +1635,15 @@ dialog h2 {
 
 .form-actions {
   flex-wrap: wrap;
+}
+
+.form-status {
+  min-height: 1.4em;
+  margin-bottom: 10px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+dialog .group-code {
+  text-align: center;
 }
