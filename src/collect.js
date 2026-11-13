@@ -141,11 +141,21 @@ export async function processQueue(db, client, relay, privateKeyPem, now, { open
 }
 
 // 초대 코드는 넣지 않습니다. 관리자도 그룹의 초대 코드 없이 멤버 목록만 봅니다.
+// 동기화 오류와 친구 추가 실패 같은 알림은 관리자에게만 보여 줍니다.
+function publicSnapshot(snapshot) {
+  return {
+    ...snapshot,
+    notices: [],
+    overview: snapshot.overview.map((week) => ({ ...week, members: week.members.map(({ error, ...member }) => member) })),
+  };
+}
+
 function adminGroup(group, snapshot) {
   return {
     id: group.id,
     createdAt: group.created_at,
     isDefault: group.id === DEFAULT_GROUP_ID,
+    notices: snapshot.notices,
     members: snapshot.overview[0].members.map(({ id, name, service, minutes, plays, lastSyncedAt, error }) => ({
       id,
       name,
@@ -209,7 +219,7 @@ export async function collect({
   const adminGroups = [];
   for (const group of listGroups(db)) {
     const snapshot = buildSnapshot(db, group.id, { now, tzOffsetMinutes: config.tzOffsetMinutes, liveKey });
-    writeFileSync(join(outputDir, 'groups', `${groupFileId(group.code)}.enc`), sealBytes(JSON.stringify(snapshot), group.code));
+    writeFileSync(join(outputDir, 'groups', `${groupFileId(group.code)}.enc`), sealBytes(JSON.stringify(publicSnapshot(snapshot)), group.code));
     adminGroups.push(adminGroup(group, snapshot));
   }
   if (adminPassword) {

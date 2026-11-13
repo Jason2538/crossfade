@@ -463,7 +463,6 @@ function demoNotice() {
         '기록은 15분쯤마다 모으며, 더 늦어질 수도 있어요.',
         state.snapshotCode === state.openCode ? ' 이 그룹은 주소를 아는 사람 누구나 볼 수 있어요.' : '',
       ),
-      state.snapshot.notices.map((message) => el('p', { class: 'notice', role: 'status' }, message)),
     ].flat();
   }
   if (!state.session.demo) return null;
@@ -690,7 +689,6 @@ function rankingSection(data, social) {
                 period === 'week' && metric === 'minutes' ? deltaLabel(member) : null,
               ),
             ),
-            member.error ? el('span', { class: 'warn-line' }, `⚠ 동기화 문제: ${member.error}`) : null,
           ),
         );
       }),
@@ -1384,6 +1382,7 @@ function adminGroupCard(group) {
             groupId: group.id,
           }),
     ),
+    (group.notices ?? []).map((message) => el('p', { class: 'admin-notice', role: 'status' }, `⚠ ${message}`)),
     group.members.length
       ? el('ul', { class: 'admin-members' }, group.members.map(adminMemberRow))
       : el('p', { class: 'admin-empty' }, '아직 멤버가 없어요.'),

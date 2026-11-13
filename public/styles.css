@@ -1,51 +1,60 @@
 :root {
   color-scheme: light;
-  --page: #f9f9f7;
-  --surface: #fcfcfb;
-  --surface-2: #f0efec;
-  --ink: #0b0b0b;
-  --ink-2: #52514e;
-  --ink-3: #6f6d68;
-  --grid: #e1e0d9;
-  --baseline: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
-  --spotify: #2a78d6;
-  --apple: #eb6834;
-  --accent: #256abf;
-  --up: #006300;
-  --critical: #d03b3b;
-  --heat-0: #f0efec;
-  --heat-1: #cde2fb;
-  --heat-2: #9ec5f4;
-  --heat-3: #5598e7;
-  --heat-4: #256abf;
-  --heat-5: #104281;
-  --radius: 14px;
-  --font: 'Pretendard Variable', Pretendard, system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+  --page: #f2f2f7;
+  --surface: #ffffff;
+  --surface-2: #f2f2f7;
+  --fill: rgba(118, 118, 128, 0.12);
+  --ink: #1d1d1f;
+  --ink-2: #6e6e73;
+  --ink-3: #86868b;
+  --grid: rgba(60, 60, 67, 0.12);
+  --baseline: #d1d1d6;
+  --border: transparent;
+  --bar: rgba(242, 242, 247, 0.72);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.05);
+  --spotify: #007aff;
+  --apple: #ff9500;
+  --accent: #007aff;
+  --up: #248a3d;
+  --live: #34c759;
+  --critical: #ff3b30;
+  --heat-0: #ececf0;
+  --heat-1: #cce4ff;
+  --heat-2: #99c9ff;
+  --heat-3: #4da3ff;
+  --heat-4: #007aff;
+  --heat-5: #0050a8;
+  --radius: 20px;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, system-ui,
+    'Segoe UI', 'Malgun Gothic', sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --page: #0d0d0d;
-    --surface: #1a1a19;
-    --surface-2: #2c2c2a;
-    --ink: #f0efec;
-    --ink-2: #c3c2b7;
-    --ink-3: #a3a198;
-    --grid: #2c2c2a;
-    --baseline: #383835;
-    --border: rgba(255, 255, 255, 0.1);
-    --spotify: #3987e5;
-    --apple: #d95926;
-    --accent: #6da7ec;
-    --up: #0ca30c;
-    --heat-0: #2c2c2a;
-    --heat-1: #104281;
-    --heat-2: #184f95;
-    --heat-3: #256abf;
-    --heat-4: #3987e5;
-    --heat-5: #86b6ef;
+    --page: #000000;
+    --surface: #1c1c1e;
+    --surface-2: #2c2c2e;
+    --fill: rgba(118, 118, 128, 0.24);
+    --ink: #f5f5f7;
+    --ink-2: #aeaeb2;
+    --ink-3: #8e8e93;
+    --grid: rgba(84, 84, 88, 0.6);
+    --baseline: #48484a;
+    --bar: rgba(0, 0, 0, 0.7);
+    --shadow: none;
+    --spotify: #0a84ff;
+    --apple: #ff9f0a;
+    --accent: #0a84ff;
+    --up: #30d158;
+    --live: #30d158;
+    --critical: #ff453a;
+    --heat-0: #2c2c2e;
+    --heat-1: #0a3a73;
+    --heat-2: #0e4f9c;
+    --heat-3: #0a6ad6;
+    --heat-4: #0a84ff;
+    --heat-5: #64b0ff;
   }
 }
 
@@ -63,9 +72,11 @@ body {
   color: var(--ink);
   font-family: var(--font);
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 1.47;
+  letter-spacing: -0.01em;
   word-break: keep-all;
   overflow-wrap: anywhere;
+  -webkit-font-smoothing: antialiased;
 }
 
 h1,
@@ -101,11 +112,18 @@ a {
 }
 
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 28px;
+  margin: -20px -24px 24px;
+  padding: 12px 24px;
+  background: var(--bar);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
 }
 
 .topbar-actions {
@@ -117,38 +135,40 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   text-decoration: none;
 }
 
 .brand img {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
 }
 
 .btn {
-  min-height: 40px;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
+  min-height: 36px;
+  padding: 7px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--accent);
+  font-size: 14.5px;
   font-weight: 600;
 }
 
 .btn:hover {
-  background: var(--surface-2);
+  filter: brightness(0.96);
 }
 
 .btn.primary {
-  border-color: transparent;
-  background: var(--ink);
-  color: var(--page);
+  background: var(--accent);
+  color: #fff;
 }
 
 .btn.primary:hover {
-  opacity: 0.86;
+  filter: brightness(1.08);
 }
 
 .btn.danger {
@@ -173,10 +193,10 @@ a {
 
 .notice {
   margin-bottom: 20px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 12px 16px;
+  border-radius: 14px;
   background: var(--surface);
+  box-shadow: var(--shadow);
   color: var(--ink-2);
   font-size: 14px;
 }
@@ -225,10 +245,10 @@ a {
 }
 
 .hero-number {
-  font-size: clamp(48px, 10vw, 84px);
+  font-size: clamp(52px, 11vw, 92px);
   font-weight: 700;
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.045em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -270,8 +290,8 @@ a {
   position: relative;
   display: flex;
   gap: 2px;
-  height: 12px;
-  margin: 12px 0 8px;
+  height: 8px;
+  margin: 16px 0 10px;
 }
 
 .fader-rail i {
@@ -281,24 +301,24 @@ a {
 }
 
 .fader-rail .spotify {
-  border-radius: 6px 0 0 6px;
+  border-radius: 4px 0 0 4px;
   background: var(--spotify);
 }
 
 .fader-rail .apple {
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 4px 4px 0;
   background: var(--apple);
 }
 
 .fader-knob {
   position: absolute;
-  top: -8px;
-  width: 16px;
+  top: -10px;
+  width: 28px;
   height: 28px;
-  margin-left: -8px;
-  border: 2px solid var(--page);
-  border-radius: 5px;
-  background: var(--ink);
+  margin-left: -14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0.5px 4px rgba(0, 0, 0, 0.12), 0 6px 13px rgba(0, 0, 0, 0.12);
 }
 
 .fader-labels {
@@ -326,9 +346,9 @@ a {
 }
 
 .section-head h2 {
-  font-size: 19px;
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.025em;
 }
 
 .section-head span {
@@ -364,9 +384,9 @@ a {
 }
 
 .card {
-  border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
+  box-shadow: var(--shadow);
 }
 
 .playing-grid {
@@ -456,7 +476,7 @@ a {
   width: 3px;
   height: 100%;
   border-radius: 2px 2px 0 0;
-  background: var(--up);
+  background: var(--live);
   transform-origin: bottom;
   animation: eq 1s ease-in-out infinite alternate;
 }
@@ -676,9 +696,9 @@ a {
 }
 
 .chip {
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 999px;
-  background: var(--surface-2);
+  background: var(--fill);
   font-size: 13px;
 }
 
@@ -901,13 +921,14 @@ a {
 
 .gate-card {
   width: min(100%, 380px);
-  padding: 28px 24px;
+  padding: 32px 26px;
+  border-radius: 26px;
 }
 
 .gate-card h1 {
-  margin: 16px 0 6px;
-  font-size: 24px;
-  letter-spacing: -0.02em;
+  margin: 18px 0 6px;
+  font-size: 28px;
+  letter-spacing: -0.03em;
 }
 
 .gate-card p {
@@ -933,10 +954,10 @@ a {
 .field input[type='password'] {
   width: 100%;
   min-height: 44px;
-  padding: 8px 12px;
-  border: 1px solid var(--baseline);
-  border-radius: 10px;
-  background: var(--page);
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--fill);
 }
 
 fieldset.field {
@@ -957,21 +978,21 @@ fieldset.field {
   gap: 8px;
   min-height: 44px;
   padding: 8px 12px;
-  border: 1px solid var(--baseline);
-  border-radius: 10px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--fill);
   cursor: pointer;
 }
 
 .service-choice label:has(input:checked) {
-  border-color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--ink);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .steps {
   margin: 0 0 16px;
-  padding: 10px 12px 10px 30px;
-  border-radius: 10px;
-  background: var(--surface-2);
+  padding: 12px 14px 12px 32px;
+  border-radius: 12px;
+  background: var(--fill);
   color: var(--ink-2);
   font-size: 13.5px;
 }
@@ -1050,7 +1071,7 @@ fieldset.field {
 
 .admin-member {
   padding: 10px 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--grid);
 }
 
 .admin-name {
@@ -1108,15 +1129,18 @@ fieldset.field {
 dialog {
   width: min(calc(100% - 32px), 460px);
   max-height: calc(100vh - 32px);
-  padding: 22px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 24px;
+  border: 0;
+  border-radius: 24px;
   background: var(--surface);
   color: var(--ink);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
 }
 
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
 }
 
 dialog h2 {
@@ -1129,10 +1153,9 @@ dialog h2 {
   z-index: 10;
   max-width: 220px;
   padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   font-size: 13px;
   pointer-events: none;
 }
@@ -1163,9 +1186,9 @@ dialog h2 {
 
 .segments {
   display: inline-flex;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--surface-2);
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--fill);
 }
 
 .segments button {
@@ -1182,7 +1205,7 @@ dialog h2 {
 .segments button.on {
   background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04);
 }
 
 .streak {
@@ -1243,14 +1266,15 @@ dialog h2 {
 }
 
 .compare-select {
-  min-height: 36px;
-  padding: 4px 10px;
-  border: 1px solid var(--baseline);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--ink);
+  min-height: 34px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--accent);
   font: inherit;
   font-size: 14px;
+  font-weight: 600;
 }
 
 .compare-scores {
@@ -1310,6 +1334,8 @@ dialog h2 {
   .topbar {
     flex-wrap: wrap;
     gap: 8px;
+    margin: -14px -16px 20px;
+    padding: 10px 16px;
   }
 
   .topbar-actions {
@@ -1544,7 +1570,7 @@ dialog h2 {
 
 @keyframes live-ring {
   from {
-    box-shadow: 0 0 0 0 var(--up);
+    box-shadow: 0 0 0 0 var(--live);
   }
   70%,
   to {
@@ -1579,4 +1605,13 @@ dialog h2 {
 .more {
   display: block;
   margin: 8px auto 0;
+}
+
+.admin-notice {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--fill);
+  color: var(--critical);
+  font-size: 13px;
 }

@@ -133,6 +133,34 @@ test('관리자 현황은 비밀번호로 암호화되고 초대 코드를 담�
   assert.equal(JSON.stringify(summary).includes('invite-secret-code'), false);
 });
 
+test('동기화 오류는 관리자 현황에만 담고 그룹 화면에는 넣지 않는다', async () => {
+  const base = {
+    config: { tzOffsetMinutes: KST, inviteCode: 'invite', dbPath: join(dir, 'errors.db') },
+    dbKey: 'db-key',
+    archivePath: join(dir, 'errors.enc'),
+    outputDir: join(dir, 'errors-site'),
+    adminPassword: 'admin-pw',
+    gapMs: 0,
+  };
+  // 친구 추가 때 확인은 통과하고, 그 뒤 기록을 받을 때 실패합니다.
+  let calls = 0;
+  const broken = {
+    ...fakeClient(),
+    getRecentTracks: async () => {
+      calls += 1;
+      if (calls > 1) throw new Error('Last.fm 응답 없음');
+      return { nowPlaying: null, scrobbles: [], totalPages: 1 };
+    },
+  };
+  await collect({ ...base, client: broken, change: { action: 'add', name: '친구', lastfmUser: 'friend', service: 'apple' } });
+
+  const group = await openSnapshot(new Uint8Array(readFileSync(join(base.outputDir, 'groups', `${groupFileId('invite')}.enc`))), 'invite');
+  assert.equal(JSON.stringify(group).includes('Last.fm 응답 없음'), false);
+  assert.deepEqual(group.notices, []);
+  const admin = await openSnapshot(new Uint8Array(readFileSync(join(base.outputDir, 'admin.enc'))), 'admin-pw');
+  assert.match(admin.groups[0].members[0].error, /Last.fm 응답 없음/);
+});
+
 test('DB를 풀 수 없으면 기록을 덮어쓰지 않고 멈춘다', async () => {
   const archivePath = join(dir, 'broken.enc');
   writeFileSync(archivePath, sealBytes('db', 'other-key'));
