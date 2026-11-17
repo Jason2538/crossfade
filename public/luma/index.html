@@ -1179,8 +1179,9 @@ if (window.top === window) location.replace('../#/luma');
    ▶ 아래 CLIENT_ID 에 Spotify 앱의 Client ID 를 넣어 주세요.
      (비워 두면 화면에서 직접 입력할 수 있어요. Client Secret 은 쓰지 않아요.)
    ===================================================================== */
+const DEFAULT_CID = '06b050ce121e47328a9c49319c0bc604';
 const LUMA_CONFIG = {
-  CLIENT_ID: '06b050ce121e47328a9c49319c0bc604',
+  get CLIENT_ID() { try { return window.parent.crossfadePlayerClientId || '06b050ce121e47328a9c49319c0bc604'; } catch { return '06b050ce121e47328a9c49319c0bc604'; } },
   // 친구 동기화 서버(Cloudflare Workers) 주소. 예: 'https://luma-sync.내이름.workers.dev'
   SYNC_URL: ''
 };
@@ -1285,8 +1286,9 @@ const rand = n => { const a = new Uint8Array(n); crypto.getRandomValues(a); retu
 
 let tok = null;
 try { tok = JSON.parse(LS.get('cfluma_tok') || 'null'); } catch { tok = null; }
+if (tok && (tok.cid || DEFAULT_CID) !== getCid()) { tok = null; LS.del('cfluma_tok'); }
 function saveTok(j){
-  tok = { access: j.access_token, refresh: j.refresh_token || tok?.refresh, exp: Date.now() + (j.expires_in || 3600) * 1000, scope: j.scope || tok?.scope || '' };
+  tok = { access: j.access_token, refresh: j.refresh_token || tok?.refresh, exp: Date.now() + (j.expires_in || 3600) * 1000, scope: j.scope || tok?.scope || '', cid: getCid() };
   LS.set('cfluma_tok', JSON.stringify(tok));
 }
 async function tokenReq(params){

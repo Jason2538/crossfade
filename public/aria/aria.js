@@ -148,7 +148,8 @@ const redirectUri = () => location.origin + location.pathname.replace(/aria\/(in
 async function loadClientId() {
   try {
     const site = await (await fetch(`../site.json?t=${Date.now()}`, { cache: 'no-store' })).json();
-    if (site?.connect?.spotifyClientId) clientId = site.connect.spotifyClientId;
+    const id = site?.connect?.playerClientId ?? site?.connect?.spotifyClientId;
+    if (id) clientId = id;
   } catch {
     // 로컬 시험처럼 site.json 이 없으면 기본 값을 씁니다.
   }
@@ -160,6 +161,8 @@ function saveToken(body) {
     refresh: body.refresh_token || tok?.refresh,
     exp: Date.now() + (body.expires_in || 3600) * 1000,
     scope: body.scope || tok?.scope || '',
+    // 어느 Spotify 앱 키로 받은 로그인인지 기억합니다. 키가 바뀌면 이 로그인은 쓸 수 없습니다.
+    client: clientId,
   };
   storage.set(KEYS.token, JSON.stringify(tok));
 }
@@ -1806,6 +1809,11 @@ function renderLogin() {
 
 async function start() {
   await loadClientId();
+  // 플레이어용 Spotify 앱 키가 바뀌었으면 예전 로그인을 지우고 다시 로그인하게 합니다.
+  if (tok && (tok.client ?? FALLBACK_CLIENT_ID) !== clientId) {
+    tok = null;
+    storage.del(KEYS.token);
+  }
   await handleCallback();
   requestAnimationFrame(tick);
   if (!tok) return renderLogin();

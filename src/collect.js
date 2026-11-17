@@ -344,6 +344,8 @@ async function main() {
       connect: {
         relayUrl,
         spotifyClientId: config.spotifyClientId,
+        // Luma·Aria 플레이어는 요청이 많아서 다른 Spotify 앱 키를 씁니다. 친구 기록 수집과 할당량을 나누기 위해서입니다.
+        playerClientId: (process.env.PLAYER_SPOTIFY_CLIENT_ID ?? '').trim() || config.spotifyClientId,
         tokenPublicKey: publicKeyJwk(tokenPrivateKey),
       },
     }),
