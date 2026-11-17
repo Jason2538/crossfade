@@ -44,6 +44,23 @@ const SPOTIFY_MESSAGES = {
   queued: 'Spotify 계정을 연결했어요. 다음 수집 때(15분쯤) 그룹에 나타나요.',
 };
 
+// Luma에서 시작한 Spotify 로그인도 크로스페이드 첫 화면으로 돌아옵니다. 그 결과는 Luma 화면에 넘깁니다.
+const LUMA_STATE_KEYS = ['cfluma_state', 'cfluma_state2'];
+const lumaCallback = takeLumaCallback();
+
+function takeLumaCallback() {
+  const search = location.search;
+  const returned = new URLSearchParams(search).get('state');
+  if (!returned) return null;
+  try {
+    if (!LUMA_STATE_KEYS.some((key) => localStorage.getItem(key) === returned)) return null;
+  } catch {
+    return null;
+  }
+  history.replaceState(null, '', `${location.pathname}#/luma`);
+  return search;
+}
+
 const state = {
   session: null,
   week: 0,
@@ -565,11 +582,43 @@ function cover(item, small = false) {
 
 const equalizer = () => el('span', { class: 'eq', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'));
 
+// 위쪽의 크로스페이드 | Luma 메뉴입니다.
+function appSwitch(active) {
+  const tab = (name, href, label) =>
+    el('a', { href, class: active === name ? 'on' : '', 'aria-current': active === name ? 'page' : null }, label);
+  return el('nav', { class: 'app-switch', 'aria-label': '앱 전환' }, tab('crossfade', '#/', '크로스페이드'), tab('luma', '#/luma', 'Luma'));
+}
+
+// Luma는 한 번 열면 계속 띄워 둡니다. 크로스페이드로 돌아와도 노래가 끊기지 않습니다.
+let lumaView = null;
+
+function showLuma(visible) {
+  if (visible && !lumaView) {
+    const frame = el('iframe', {
+      class: 'luma-frame',
+      title: 'Luma',
+      src: `luma/${lumaCallback ?? ''}`,
+      allow: 'autoplay; encrypted-media; fullscreen; clipboard-write; picture-in-picture',
+    });
+    lumaView = el(
+      'div',
+      { class: 'luma-view' },
+      el('header', { class: 'luma-bar' }, el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), appSwitch('luma'))),
+      frame,
+    );
+    document.body.append(lumaView);
+  }
+  if (lumaView) lumaView.hidden = !visible;
+  app.hidden = visible;
+  document.documentElement.classList.toggle('luma-open', visible);
+  document.title = visible ? 'Luma · 크로스페이드' : '크로스페이드';
+}
+
 function header() {
   return el(
     'header',
     { class: 'topbar' },
-    el('a', { class: 'brand', href: '#/' }, el('img', { src: 'favicon.svg', alt: '' }), '크로스페이드'),
+    el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), appSwitch('crossfade')),
     el(
       'div',
       { class: 'topbar-actions' },
@@ -1188,6 +1237,7 @@ async function renderHome() {
       { class: 'shell' },
       header(),
       demoNotice(),
+      state.snapshot?.announcement ? el('p', { class: 'announcement', role: 'note' }, `📢 ${state.snapshot.announcement}`) : null,
       el(
         'section',
         { class: 'hero' },
@@ -1419,9 +1469,20 @@ async function renderMember(id) {
   );
 }
 
+async function fetchAdminSummary(password) {
+  const response = await fetch(`admin.enc?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null);
+  if (!response?.ok) throw new Error('관리자 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+  try {
+    return await openSnapshot(new Uint8Array(await response.arrayBuffer()), password);
+  } catch {
+    throw new Error('비밀번호가 맞지 않아요.');
+  }
+}
+
 function renderAdminLogin() {
   const error = el('p', { class: 'form-error', role: 'alert' });
   const input = el('input', { type: 'password', name: 'password', autocomplete: 'off', required: true });
+  const submit = el('button', { class: 'btn primary', type: 'submit' }, '들어가기');
   paint(
     'admin-login',
     el(
@@ -1434,18 +1495,17 @@ function renderAdminLogin() {
           onsubmit: async (event) => {
             event.preventDefault();
             error.textContent = '';
+            submit.disabled = true;
+            submit.textContent = '확인하는 중…';
             const password = input.value.trim();
-            const response = await fetch(`admin.enc?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null);
-            if (!response?.ok) {
-              error.textContent = '관리자 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
-              return;
-            }
             try {
-              const summary = await openSnapshot(new Uint8Array(await response.arrayBuffer()), password);
-              state.admin = { password, summary, requested: new Set() };
+              const summary = await fetchAdminSummary(password);
+              state.admin = { password, summary, pending: [], watch: null };
               renderAdmin();
-            } catch {
-              error.textContent = '비밀번호가 맞지 않아요.';
+            } catch (failure) {
+              error.textContent = failure.message;
+              submit.disabled = false;
+              submit.textContent = '들어가기';
             }
           },
         },
@@ -1454,7 +1514,7 @@ function renderAdminLogin() {
         el('p', {}, '관리자 비밀번호를 입력해 주세요.'),
         el('label', { class: 'field' }, el('span', {}, '비밀번호'), input),
         error,
-        el('button', { class: 'btn primary', type: 'submit' }, '들어가기'),
+        submit,
         el('a', { class: 'link-button', href: '#/' }, '사이트로 돌아가기'),
       ),
     ),
@@ -1462,22 +1522,61 @@ function renderAdminLogin() {
   input.focus();
 }
 
-function adminButton(key, label, question, request) {
+const isAdminView = () => location.hash === '#/admin' && state.admin;
+
+// 요청이 반영된 새 현황이 올라올 때까지 확인합니다. 수집이 막 끝난 직후라면 다음 수집을 다시 부탁합니다.
+function watchAdmin(sentAt, tries = COLLECT_WATCH_TRIES) {
   const { admin } = state;
-  if (admin.requested.has(key)) return el('span', { class: 'admin-requested' }, '삭제 요청됨');
+  clearTimeout(admin.watch);
+  admin.watch = setTimeout(async () => {
+    if (state.admin !== admin) return;
+    const summary = await fetchAdminSummary(admin.password).catch(() => null);
+    if (summary && summary.generatedAt > sentAt) {
+      admin.summary = summary;
+      admin.pending = [];
+      admin.watch = null;
+      admin.flash = '반영됐어요. 아래 관리 기록에서 결과를 확인하세요.';
+      if (isAdminView()) renderAdmin();
+      return;
+    }
+    if (tries <= 1) {
+      admin.watch = null;
+      admin.flash = '아직 반영되지 않았어요. 다음 자동 수집(15분 안)에 반영돼요.';
+      if (isAdminView()) renderAdmin();
+      return;
+    }
+    // 수집기는 6분에 한 번만 시작할 수 있으므로 그 사이에는 다시 부탁해도 무시됩니다.
+    if (tries % 8 === 0) requestCollection(state.connect);
+    watchAdmin(sentAt, tries - 1);
+  }, COLLECT_WATCH_MS);
+}
+
+async function adminSend(request, label) {
+  const { admin } = state;
+  await sendToCollector(state.connect, { kind: 'admin', password: admin.password, ...request });
+  admin.pending.push(label);
+  admin.flash = null;
+  const sentAt = Math.floor(Date.now() / 1000);
+  requestCollection(state.connect);
+  watchAdmin(sentAt);
+  renderAdmin();
+}
+
+// 버튼을 눌렀을 때 요청을 보내고, 실패하면 이유를 보여 줍니다.
+function adminAction(label, { kind = 'btn', question, ask } = {}, build) {
   return el(
     'button',
     {
-      class: 'btn danger',
+      class: `btn small ${kind}`,
       type: 'button',
       onclick: async (event) => {
-        if (!confirm(question)) return;
         const button = event.currentTarget;
+        if (question && !confirm(question)) return;
+        const request = await build(ask);
+        if (!request) return;
         button.disabled = true;
         try {
-          await sendToCollector(state.connect, { kind: 'admin', password: admin.password, ...request });
-          admin.requested.add(key);
-          renderAdmin();
+          await adminSend(request.request, request.label);
         } catch (failure) {
           button.disabled = false;
           alert(failure.message);
@@ -1488,7 +1587,36 @@ function adminButton(key, label, question, request) {
   );
 }
 
-function adminMemberRow(member) {
+function groupTitle(group) {
+  return group.isDefault ? '기본 그룹' : `그룹 ${group.id}`;
+}
+
+function chooseGroup(member, groups) {
+  return new Promise((resolve) => {
+    const select = el(
+      'select',
+      { name: 'group' },
+      groups.filter((group) => group.id !== member.groupId).map((group) => el('option', { value: group.id }, groupTitle(group))),
+    );
+    const dialog = el(
+      'dialog',
+      { onclose: () => (dialog.remove(), resolve(dialog.returnValue === 'ok' ? Number(select.value) : null)) },
+      el('h2', {}, `${member.name} 님 옮기기`),
+      el('p', { class: 'dialog-note' }, '청취 기록도 함께 옮겨져요.'),
+      el('label', { class: 'field' }, el('span', {}, '옮길 그룹'), select),
+      el(
+        'div',
+        { class: 'form-actions' },
+        el('button', { class: 'btn', type: 'button', onclick: () => dialog.close('cancel') }, '취소'),
+        el('button', { class: 'btn primary', type: 'button', onclick: () => dialog.close('ok') }, '옮기기'),
+      ),
+    );
+    document.body.append(dialog);
+    dialog.showModal();
+  });
+}
+
+function adminMemberRow(member, groups) {
   return el(
     'li',
     { class: 'admin-member' },
@@ -1497,18 +1625,36 @@ function adminMemberRow(member) {
       { class: 'admin-name' },
       el('b', {}, member.name),
       el('span', {}, `${SERVICE_NAMES[member.service]} · 이번 주 ${number(member.minutes)}분 · ${number(member.plays)}회`),
+      member.lastSyncedAt ? el('span', {}, `마지막 동기화 ${timeAgo(member.lastSyncedAt)}`) : null,
       member.error ? el('span', { class: 'warn-line' }, `⚠ ${member.error}`) : null,
     ),
-    adminButton(`member:${member.id}`, '빼기', `${member.name} 님을 빼고 저장된 기록도 삭제할까요?`, {
-      action: 'removeMember',
-      memberId: member.id,
-    }),
+    el(
+      'span',
+      { class: 'admin-actions' },
+      adminAction('이름', {}, () => {
+        const name = prompt(`${member.name} 님의 새 이름`, member.name)?.trim();
+        if (!name || name === member.name) return null;
+        return { request: { action: 'renameMember', memberId: member.id, name }, label: `${member.name} → ${name} 이름 바꾸기` };
+      }),
+      groups.length > 1
+        ? adminAction('옮기기', {}, async () => {
+            const groupId = await chooseGroup(member, groups);
+            if (!groupId) return null;
+            return { request: { action: 'moveMember', memberId: member.id, groupId }, label: `${member.name} 님 옮기기` };
+          })
+        : null,
+      adminAction('빼기', { kind: 'danger', question: `${member.name} 님을 빼고 저장된 기록도 삭제할까요?` }, () => ({
+        request: { action: 'removeMember', memberId: member.id },
+        label: `${member.name} 님 빼기`,
+      })),
+    ),
   );
 }
 
-function adminGroupCard(group) {
-  const title = group.isDefault ? '기본 그룹' : `그룹 ${group.id}`;
+function adminGroupCard(group, groups) {
+  const title = groupTitle(group);
   const created = new Date(group.createdAt * 1000).toLocaleDateString('ko-KR');
+  const members = group.members.map((member) => ({ ...member, groupId: group.id }));
   return el(
     'section',
     { class: 'card admin-group' },
@@ -1516,46 +1662,138 @@ function adminGroupCard(group) {
       'div',
       { class: 'admin-group-head' },
       el('span', {}, el('h2', {}, title), el('span', {}, `${created} 생성 · ${group.members.length}명`)),
-      group.isDefault
-        ? null
-        : adminButton(`group:${group.id}`, '그룹 삭제', `${title}과 멤버의 기록을 모두 삭제할까요? 되돌릴 수 없어요.`, {
-            action: 'removeGroup',
-            groupId: group.id,
-          }),
+      el(
+        'span',
+        { class: 'admin-actions' },
+        adminAction(group.announcement ? '공지 고치기' : '공지 쓰기', {}, () => {
+          const text = prompt(`${title} 친구들에게 보일 공지 (비우면 공지를 내려요)`, group.announcement ?? '');
+          if (text === null || text.trim() === (group.announcement ?? '')) return null;
+          return { request: { action: 'announce', groupId: group.id, text }, label: `${title} 공지 ${text.trim() ? '올리기' : '내리기'}` };
+        }),
+        group.notices?.length
+          ? adminAction('오류 지우기', {}, () => ({ request: { action: 'clearNotices', groupId: group.id }, label: `${title} 오류 알림 지우기` }))
+          : null,
+        group.isDefault
+          ? null
+          : adminAction('그룹 삭제', { kind: 'danger', question: `${title}과 멤버의 기록을 모두 삭제할까요? 되돌릴 수 없어요.` }, () => ({
+              request: { action: 'removeGroup', groupId: group.id },
+              label: `${title} 삭제`,
+            })),
+      ),
     ),
+    group.announcement ? el('p', { class: 'announcement small' }, `📢 ${group.announcement}`) : null,
     (group.notices ?? []).map((message) => el('p', { class: 'admin-notice', role: 'status' }, `⚠ ${message}`)),
-    group.members.length
-      ? el('ul', { class: 'admin-members' }, group.members.map(adminMemberRow))
+    members.length
+      ? el(
+          'ul',
+          { class: 'admin-members' },
+          members.map((member) => adminMemberRow(member, groups)),
+        )
       : el('p', { class: 'admin-empty' }, '아직 멤버가 없어요.'),
   );
 }
 
+function adminLogSection(log = []) {
+  return el(
+    'section',
+    { class: 'section' },
+    el('div', { class: 'section-head' }, el('h2', {}, '관리 기록')),
+    log.length
+      ? el(
+          'ul',
+          { class: 'card list no-rank admin-log' },
+          log.map((entry) =>
+            el(
+              'li',
+              { class: entry.ok ? '' : 'failed' },
+              el('span', { class: 'admin-log-mark', 'aria-hidden': 'true' }, entry.ok ? '✓' : '⚠'),
+              el('span', { class: 'admin-log-text' }, entry.message),
+              el('span', { class: 'count' }, timeAgo(entry.at)),
+            ),
+          ),
+        )
+      : el('div', { class: 'card empty' }, '아직 기록이 없어요. 관리자가 한 일과 결과가 여기에 남아요.'),
+  );
+}
+
+async function adminCreateGroup(event) {
+  const button = event.currentTarget;
+  if (!confirm('새 그룹을 만들까요? 만든 뒤 초대 링크를 친구에게 보내면 돼요.')) return;
+  const code = createCode();
+  button.disabled = true;
+  try {
+    await adminSend({ action: 'createGroup', code }, '새 그룹 만들기');
+    openInviteDialog(code);
+  } catch (failure) {
+    alert(failure.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function adminCollectNow(event) {
+  const button = event.currentTarget;
+  button.disabled = true;
+  const started = await requestCollection(state.connect);
+  state.admin.flash = started
+    ? '수집을 시작했어요. 1~2분 뒤 자동으로 새 현황을 불러와요.'
+    : '방금 수집했거나 수집 중이에요. 잠시 뒤 다시 확인해요.';
+  watchAdmin(state.admin.summary.generatedAt);
+  renderAdmin();
+}
+
+async function adminReload(event) {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    state.admin.summary = await fetchAdminSummary(state.admin.password);
+    state.admin.flash = '최신 현황을 불러왔어요.';
+  } catch (failure) {
+    state.admin.flash = failure.message;
+  }
+  renderAdmin();
+}
+
 function renderAdmin() {
   if (!state.admin) return renderAdminLogin();
-  const { summary } = state.admin;
+  const { summary, pending, flash } = state.admin;
+  const groups = summary.groups;
   paint(
     'admin',
     el(
       'main',
       { class: 'shell' },
       el('a', { class: 'back', href: '#/' }, '‹ 사이트로 돌아가기'),
-      el('div', { class: 'detail-head' }, el('div', {}, el('h1', {}, '관리자'))),
+      el(
+        'div',
+        { class: 'detail-head' },
+        el('div', {}, el('h1', {}, '관리자')),
+        el(
+          'span',
+          { class: 'admin-actions' },
+          el('button', { class: 'btn small', type: 'button', onclick: adminReload }, '현황 새로고침'),
+          state.connect ? el('button', { class: 'btn small', type: 'button', onclick: adminCollectNow }, '지금 수집') : null,
+          state.connect ? el('button', { class: 'btn small primary', type: 'button', onclick: adminCreateGroup }, '새 그룹') : null,
+        ),
+      ),
       el(
         'p',
-        { class: 'notice' },
-        el('strong', {}, `${timeAgo(summary.generatedAt)} 기준 현황이에요. `),
-        '삭제는 다음 수집 때 반영돼요.',
+        { class: 'notice', role: 'status' },
+        pending.length
+          ? [el('strong', {}, '반영하는 중이에요. '), `${pending.join(', ')} · 보통 1~2분 걸리고, 끝나면 자동으로 바뀌어요.`]
+          : [el('strong', {}, `${timeAgo(summary.generatedAt)} 기준 현황이에요. `), flash ?? '바꾼 내용은 바로 수집을 시작해 1~2분 안에 반영돼요.'],
       ),
       el(
         'div',
         { class: 'stat-row' },
         [
-          [`${summary.groups.length}/${summary.maxGroups}`, '그룹'],
-          [number(summary.groups.reduce((total, group) => total + group.members.length, 0)), '멤버'],
+          [`${groups.length}/${summary.maxGroups}`, '그룹'],
+          [number(groups.reduce((total, group) => total + group.members.length, 0)), '멤버'],
           [`${summary.spotifyUsers}/5`, 'Spotify 로그인'],
         ].map(([value, label]) => el('div', { class: 'card stat' }, el('b', {}, value), el('span', {}, label))),
       ),
-      summary.groups.map(adminGroupCard),
+      groups.map((group) => adminGroupCard(group, groups)),
+      adminLogSection(summary.log),
     ),
   );
 }
@@ -1902,6 +2140,9 @@ async function render() {
     state.refreshTimer = setTimeout(render, REFRESH_MS);
     return;
   }
+  const onLuma = location.hash === '#/luma';
+  showLuma(onLuma);
+  if (onLuma) return;
   try {
     if (!state.session) state.session = await loadSession();
     if (state.session.static && location.hash === '#/admin') return renderAdmin();

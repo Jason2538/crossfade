@@ -4,13 +4,17 @@ import { pathToFileURL } from 'node:url';
 import { loadConfig, loadEnvFile, ROOT } from './config.js';
 import { groupFileId, openBytes, openForCollector, publicKeyJwk, samePassword, sealBytes, sealLiveToken } from './crypto.js';
 import {
+  addAdminLog,
   addGroup,
   addNotice,
+  clearNotices,
   countSpotifyAccounts,
   findSpotifyAccount,
+  getGroup,
   getGroupByCode,
   getMember,
   getSpotifyAccount,
+  listAdminLog,
   listGroups,
   listMembers,
   listNotices,
@@ -18,7 +22,9 @@ import {
   openDb,
   removeGroup,
   removeMember,
+  renameMember,
   saveDefaultGroup,
+  setAnnouncement,
 } from './db.js';
 import { createClient } from './lastfm.js';
 import { createRelayClient } from './relay.js';
@@ -33,6 +39,8 @@ import { nowSeconds } from './time.js';
 export const MAX_GROUPS = 20;
 const NOTICE_SECONDS = 7 * 86400;
 const DEFAULT_GROUP_ID = 1;
+const MAX_NAME_LENGTH = 30;
+const MAX_ANNOUNCEMENT_LENGTH = 300;
 
 // refresh token은 Cloudflare에 보내지 않습니다. 1시간 뒤 끝나는 access token만 넘깁니다.
 function liveTarget(db, member) {
@@ -44,11 +52,13 @@ function liveTarget(db, member) {
 // GitHub Pages에는 서버가 없으므로, 화면에 필요한 값을 그룹별로 미리 계산해 초대 코드로 암호화해 둡니다.
 export function buildSnapshot(db, groupId, { now, tzOffsetMinutes, liveKey = null }) {
   const weeks = Array.from({ length: MAX_WEEKS_BACK + 1 }, (_, week) => week);
+  const announcement = getGroup(db, groupId)?.announcement ?? '';
   const targets = listMembers(db, groupId)
     .map((member) => [member.id, liveTarget(db, member)])
     .filter(([, target]) => target);
   return {
     generatedAt: now,
+    announcement,
     liveTokens: liveKey ? Object.fromEntries(targets.map(([id, target]) => [id, sealLiveToken(target, liveKey)])) : {},
     notices: listNotices(db, groupId, now - NOTICE_SECONDS),
     social: buildSocial(db, groupId, { now, tzOffsetMinutes }),
@@ -108,12 +118,82 @@ const HANDLERS = {
   },
 };
 
-// 관리자 화면의 요청입니다. 비밀번호가 맞을 때만 처리합니다.
-function handleAdmin(db, request, adminPassword) {
-  if (!adminPassword || !samePassword(request.password, adminPassword)) throw new Error('관리자 비밀번호가 맞지 않습니다.');
-  if (request.action === 'removeMember') removeMember(db, request.memberId);
-  // 1번 그룹은 사이트의 기본 그룹이라 지우지 않습니다.
-  if (request.action === 'removeGroup' && request.groupId !== DEFAULT_GROUP_ID) removeGroup(db, request.groupId);
+const groupLabel = (groupId) => (groupId === DEFAULT_GROUP_ID ? '기본 그룹' : `그룹 ${groupId}`);
+
+function needMember(db, memberId) {
+  const member = getMember(db, memberId);
+  if (!member) throw new Error('이미 없는 멤버예요');
+  return member;
+}
+
+function needGroup(db, groupId) {
+  const group = getGroup(db, groupId);
+  if (!group) throw new Error('이미 없는 그룹이에요');
+  return group;
+}
+
+// 관리자가 할 수 있는 일입니다. 각각 관리 기록에 남길 문장을 돌려줍니다.
+const ADMIN_ACTIONS = {
+  removeMember(db, { memberId }) {
+    const member = needMember(db, memberId);
+    removeMember(db, member.id);
+    return `${member.name} 님을 뺐어요`;
+  },
+  renameMember(db, { memberId, name }) {
+    const member = needMember(db, memberId);
+    const next = String(name ?? '').trim().slice(0, MAX_NAME_LENGTH);
+    if (!next) throw new Error('이름이 비어 있어요');
+    renameMember(db, member.id, next);
+    return `${member.name} 님의 이름을 ${next}(으)로 바꿨어요`;
+  },
+  moveMember(db, { memberId, groupId }) {
+    const member = needMember(db, memberId);
+    needGroup(db, groupId);
+    moveMember(db, member.id, groupId);
+    return `${member.name} 님을 ${groupLabel(groupId)}으로 옮겼어요`;
+  },
+  removeGroup(db, { groupId }) {
+    // 1번 그룹은 사이트의 기본 그룹이라 지우지 않습니다.
+    if (groupId === DEFAULT_GROUP_ID) throw new Error('기본 그룹은 지울 수 없어요');
+    needGroup(db, groupId);
+    removeGroup(db, groupId);
+    return `${groupLabel(groupId)}을 지웠어요`;
+  },
+  createGroup(db, { code }, now) {
+    if (typeof code !== 'string' || code.length < 8) throw new Error('그룹 코드가 너무 짧아요');
+    if (getGroupByCode(db, code)) throw new Error('이미 있는 코드예요');
+    if (listGroups(db).length >= MAX_GROUPS) throw new Error(`그룹은 ${MAX_GROUPS}개까지만 만들 수 있어요`);
+    return `${groupLabel(addGroup(db, code, now))}을 만들었어요`;
+  },
+  announce(db, { groupId, text }) {
+    needGroup(db, groupId);
+    const message = String(text ?? '').trim().slice(0, MAX_ANNOUNCEMENT_LENGTH);
+    setAnnouncement(db, groupId, message);
+    return message ? `${groupLabel(groupId)}에 공지를 올렸어요` : `${groupLabel(groupId)}의 공지를 내렸어요`;
+  },
+  clearNotices(db, { groupId }) {
+    needGroup(db, groupId);
+    clearNotices(db, groupId);
+    return `${groupLabel(groupId)}의 오류 알림을 지웠어요`;
+  },
+};
+
+// 관리자 화면의 요청입니다. 비밀번호가 맞을 때만 처리하고, 결과를 관리 기록에 남깁니다.
+function handleAdmin(db, request, adminPassword, now) {
+  if (!adminPassword || !samePassword(request.password, adminPassword)) {
+    addAdminLog(db, '비밀번호가 맞지 않는 관리자 요청을 무시했어요', false, now);
+    return;
+  }
+  const action = Object.hasOwn(ADMIN_ACTIONS, request.action) ? ADMIN_ACTIONS[request.action] : null;
+  if (!action) {
+    addAdminLog(db, '알 수 없는 관리자 요청을 무시했어요', false, now);
+    return;
+  }
+  try {
+    addAdminLog(db, action(db, request, now), true, now);
+  } catch (error) {
+    addAdminLog(db, `처리하지 못했어요: ${error.message}`, false, now);
+  }
 }
 
 // 중계 대기열의 요청을 처리합니다. 초대 코드를 아는 사람만 그 그룹을 바꿀 수 있습니다. 처리한 항목의 id를 돌려줍니다.
@@ -124,7 +204,7 @@ export async function processQueue(db, client, relay, privateKeyPem, now, { open
     try {
       const request = openForCollector(sealed, privateKeyPem);
       if (request.kind === 'admin') {
-        handleAdmin(db, request, adminPassword);
+        handleAdmin(db, request, adminPassword, now);
         done.push(id);
         continue;
       }
@@ -155,6 +235,7 @@ function adminGroup(group, snapshot) {
     id: group.id,
     createdAt: group.created_at,
     isDefault: group.id === DEFAULT_GROUP_ID,
+    announcement: snapshot.announcement,
     notices: snapshot.notices,
     members: snapshot.overview[0].members.map(({ id, name, service, minutes, plays, lastSyncedAt, error }) => ({
       id,
@@ -223,7 +304,13 @@ export async function collect({
     adminGroups.push(adminGroup(group, snapshot));
   }
   if (adminPassword) {
-    const summary = { generatedAt: now, maxGroups: MAX_GROUPS, spotifyUsers: countSpotifyAccounts(db), groups: adminGroups };
+    const summary = {
+      generatedAt: now,
+      maxGroups: MAX_GROUPS,
+      spotifyUsers: countSpotifyAccounts(db),
+      groups: adminGroups,
+      log: listAdminLog(db),
+    };
     writeFileSync(join(outputDir, 'admin.enc'), sealBytes(JSON.stringify(summary), adminPassword));
   }
 

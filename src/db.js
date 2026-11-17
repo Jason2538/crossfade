@@ -29,6 +29,14 @@ const SCHEMA = `
     created_at INTEGER NOT NULL
   );
 
+  -- 관리자가 한 일과 그 결과입니다. 관리자 화면에서 반영됐는지 확인합니다.
+  CREATE TABLE IF NOT EXISTS admin_log (
+    id INTEGER PRIMARY KEY,
+    message TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS members (${MEMBERS_COLUMNS});
 
   CREATE TABLE IF NOT EXISTS scrobbles (
@@ -76,7 +84,13 @@ export function openDb(path) {
   addGroupColumn(db);
   db.exec('PRAGMA foreign_keys = ON');
   db.exec(SCHEMA);
+  addColumn(db, 'groups', 'announcement', "TEXT NOT NULL DEFAULT ''");
   return db;
+}
+
+function addColumn(db, table, column, definition) {
+  if (db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 // 그룹이 생기기 전의 DB를 옮깁니다. 기존 멤버는 모두 1번 그룹이 됩니다.
@@ -98,7 +112,7 @@ function addGroupColumn(db) {
 
 export function resetDb(db) {
   db.exec(
-    'DELETE FROM track_lengths; DELETE FROM spotify_accounts; DELETE FROM now_playing; DELETE FROM scrobbles; DELETE FROM members; DELETE FROM group_notices; DELETE FROM groups;',
+    'DELETE FROM track_lengths; DELETE FROM spotify_accounts; DELETE FROM now_playing; DELETE FROM scrobbles; DELETE FROM members; DELETE FROM group_notices; DELETE FROM admin_log; DELETE FROM groups;',
   );
 }
 
@@ -126,6 +140,36 @@ export function removeGroup(db, groupId) {
   db.prepare('DELETE FROM members WHERE group_id = ?').run(groupId);
   db.prepare('DELETE FROM group_notices WHERE group_id = ?').run(groupId);
   return db.prepare('DELETE FROM groups WHERE id = ?').run(groupId).changes > 0;
+}
+
+export function getGroup(db, groupId) {
+  return db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId);
+}
+
+export function setAnnouncement(db, groupId, text) {
+  return db.prepare('UPDATE groups SET announcement = ? WHERE id = ?').run(text, groupId).changes > 0;
+}
+
+export function clearNotices(db, groupId) {
+  db.prepare('DELETE FROM group_notices WHERE group_id = ?').run(groupId);
+}
+
+export function renameMember(db, id, name) {
+  return db.prepare('UPDATE members SET name = ? WHERE id = ?').run(name, id).changes > 0;
+}
+
+const ADMIN_LOG_LIMIT = 30;
+
+export function addAdminLog(db, message, ok, createdAt) {
+  db.prepare('INSERT INTO admin_log (message, ok, created_at) VALUES (?, ?, ?)').run(message, ok ? 1 : 0, createdAt);
+  db.prepare('DELETE FROM admin_log WHERE id NOT IN (SELECT id FROM admin_log ORDER BY id DESC LIMIT ?)').run(ADMIN_LOG_LIMIT);
+}
+
+export function listAdminLog(db) {
+  return db
+    .prepare('SELECT message, ok, created_at FROM admin_log ORDER BY id DESC')
+    .all()
+    .map((row) => ({ message: row.message, ok: row.ok === 1, at: row.created_at }));
 }
 
 export function addNotice(db, groupId, message, createdAt) {

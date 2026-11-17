@@ -71,6 +71,18 @@ Spotify 친구는 Last.fm으로 연결하거나 Spotify 계정으로 바로 로�
 값을 모두 넣으면 다음 수집부터 새 그룹 만들기와 로그인 버튼이 나타납니다.
 - GitHub 약관은 Actions를 서버리스 앱의 일부로 쓰지 말라고 안내합니다. 쓰기 전에 [약관](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features)을 확인하세요.
 
+## Luma 탭
+
+위쪽 메뉴의 **Luma**는 [Luma](https://github.com/Jason2538/luma) 웹 플레이어(검색, 재생, 가사, 플레이리스트)를 크로스페이드 안에서 띄웁니다.
+
+- `public/luma/index.html` 은 `node tools/import-luma.mjs <luma/index.html>` 로 만듭니다. Luma를 고친 뒤 다시 실행하세요.
+- 크로스페이드와 같은 Spotify 앱(Client ID)을 쓰므로 Spotify 대시보드에 크로스페이드 주소만 등록되어 있으면 됩니다. 로그인 결과는 크로스페이드 첫 화면으로 돌아온 뒤 Luma 탭으로 넘겨집니다.
+- 한 번 연 Luma는 크로스페이드로 돌아가도 계속 떠 있어서 노래가 끊기지 않습니다. 재생에는 Spotify Premium이 필요합니다.
+
+## 관리자
+
+사이트 맨 아래 "관리자"에서 멤버 빼기·이름 바꾸기·다른 그룹으로 옮기기, 그룹 만들기·삭제, 그룹 공지, 오류 알림 지우기, 지금 수집을 할 수 있습니다. 요청을 보내면 바로 수집을 시작하고, 반영되면 화면이 저절로 바뀝니다. 결과는 "관리 기록"에 남습니다.
+
 ## Last.fm을 쓰는 이유
 
 - **Spotify API:** 개발 모드에서는 앱당 5명까지만 연결할 수 있습니다.
