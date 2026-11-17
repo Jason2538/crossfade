@@ -47,8 +47,8 @@ const PATCHES = [
     'setInterval(() => { if (!tok || S.web || document.hidden || cfAway() || Date.now() < cfRateUntil) return;',
     1,
   ],
-  // 재생 상태 확인을 2.5초에서 5초로(멈춰 있으면 10초) 늘립니다.
-  ['pollRemote(); }, 2500);', 'pollRemote(); }, 5000);', 1],
+  // 재생 상태 확인을 2.5초에서 8초로(멈춰 있으면 16초) 늘립니다.
+  ['pollRemote(); }, 2500);', 'pollRemote(); }, 8000);', 1],
   // 시작할 때 Spotify가 막으면(429) 오류만 띄우지 않고, 막힌 시간이 지나면 저절로 다시 연결합니다.
   [
     "    toast('Spotify에 연결하지 못했어요: ' + e.message);",

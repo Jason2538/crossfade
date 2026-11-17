@@ -869,6 +869,19 @@ function showPlayer(name) {
   pager.sync();
 }
 
+// Spotify가 이 앱의 요청을 막아 둔 동안 알려 줍니다. 그동안은 Spotify 친구들의 새 기록이 들어오지 않습니다.
+function spotifyBlockedNotice() {
+  const until = state.snapshot?.spotifyBlockedUntil;
+  if (!until || until * 1000 < Date.now()) return null;
+  const time = new Date(until * 1000).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+  return el(
+    'p',
+    { class: 'notice warn', role: 'status' },
+    el('strong', {}, `Spotify가 ${time}까지 요청을 막아 두었어요. `),
+    '요청이 너무 많았기 때문이에요. 그때까지 Spotify 친구들의 새 기록과 지금 듣는 곡이 들어오지 않고, Luma·Aria도 Spotify에 연결되지 않아요.',
+  );
+}
+
 function header() {
   return el(
     'header',
@@ -1472,6 +1485,7 @@ async function renderHome() {
       header(),
       demoNotice(),
       state.snapshot?.announcement ? el('p', { class: 'announcement', role: 'note' }, `📢 ${state.snapshot.announcement}`) : null,
+      spotifyBlockedNotice(),
       el(
         'section',
         { class: 'hero' },

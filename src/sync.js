@@ -1,4 +1,6 @@
 import {
+  getSetting,
+  setSetting,
   getSpotifyAccount,
   insertScrobbles,
   latestPlayedAt,
@@ -50,8 +52,27 @@ export async function syncMember(db, client, member, { tzOffsetMinutes, gapMs = 
 }
 
 // Spotify는 최근 재생 50곡만 주지만 1분마다 받으므로 빠지는 곡은 거의 없습니다. 중복은 DB가 걸러 줍니다.
+// Spotify가 "요청이 너무 많다"(429)며 막으면 알려 준 시각까지 이 앱의 모든 Spotify 요청이 거절됩니다.
+// 그동안 계속 물으면 막힘이 길어질 수 있어서, 그 시각을 저장해 두고 그때까지는 묻지 않습니다.
+export const SPOTIFY_BLOCK_KEY = 'spotify_blocked_until';
+
+export function spotifyBlockedUntil(db, now = nowSeconds()) {
+  const until = Number(getSetting(db, SPOTIFY_BLOCK_KEY)) || 0;
+  return until > now ? until : null;
+}
+
+function blockedMessage(until) {
+  const time = new Date(until * 1000).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' });
+  return `Spotify가 요청이 너무 많다며 ${time}까지 막아 두었습니다. 그때부터 다시 가져옵니다.`;
+}
+
 export async function syncSpotifyMember(db, spotify, member, account) {
   const now = nowSeconds();
+  const blocked = spotifyBlockedUntil(db, now);
+  if (blocked) {
+    markSynced(db, member.id, now, blockedMessage(blocked));
+    return;
+  }
   try {
     const token = await freshAccessToken(db, spotify, account, now);
     const playing = await spotify.getCurrentlyPlaying(token);
@@ -63,6 +84,12 @@ export async function syncSpotifyMember(db, spotify, member, account) {
     }
     markSynced(db, member.id, now);
   } catch (error) {
+    if (error.status === 429) {
+      const until = now + (error.retryAfter ?? 60);
+      setSetting(db, SPOTIFY_BLOCK_KEY, until);
+      markSynced(db, member.id, now, blockedMessage(until));
+      return;
+    }
     markSynced(db, member.id, now, describeSpotifyError(error));
   }
 }

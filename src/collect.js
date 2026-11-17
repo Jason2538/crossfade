@@ -32,7 +32,7 @@ import { MAX_WEEKS_BACK, registerMember, saveSpotifyLogin, SpotifyGroupFull } fr
 import { createSpotifyClient } from './spotify.js';
 import { buildSocial } from './social.js';
 import { buildMemberDetail, buildOverview } from './stats.js';
-import { syncAll } from './sync.js';
+import { spotifyBlockedUntil, syncAll } from './sync.js';
 import { nowSeconds } from './time.js';
 
 // 누구나 그룹을 만들 수 있으므로 GitHub Actions 한 번의 실행 시간이 늘어나지 않게 막아 둡니다.
@@ -59,6 +59,8 @@ export function buildSnapshot(db, groupId, { now, tzOffsetMinutes, liveKey = nul
   return {
     generatedAt: now,
     announcement,
+    // Spotify가 막아 둔 동안 화면에 그 사실과 풀리는 시각을 보여 줍니다.
+    spotifyBlockedUntil: spotifyBlockedUntil(db, now),
     liveTokens: liveKey ? Object.fromEntries(targets.map(([id, target]) => [id, sealLiveToken(target, liveKey)])) : {},
     notices: listNotices(db, groupId, now - NOTICE_SECONDS),
     social: buildSocial(db, groupId, { now, tzOffsetMinutes }),

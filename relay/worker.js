@@ -8,7 +8,10 @@ const ITEM_PREFIX = 'item:';
 const RATE_PREFIX = 'rate:';
 const DISPATCH_KEY = 'dispatch';
 const DISPATCH_GAP_SECONDS = 60;
-const LIVE_CACHE_SECONDS = 40;
+const LIVE_CACHE_SECONDS = 60;
+// Spotify 최근 재생 목록은 수집기가 15분마다 가져오므로 실시간에서는 3분에 한 번만 묻습니다.
+const LIVE_RECENT_SECONDS = 180;
+const SPOTIFY_BLOCK_KEY = 'spotify-blocked-until';
 // Spotify가 막거나 실패하면 이 시간 동안은 다시 묻지 않습니다(보는 사람마다 다시 묻지 않도록).
 const LIVE_FAILURE_SECONDS = 90;
 const LASTFM_PLACEHOLDER_IMAGE = '2a96cbd8b46e442fc41c2b86b821562f';
@@ -138,18 +141,35 @@ function spotifyTrack(item) {
 }
 
 // 토큰이 끝났으면 null 을 돌려주고, 사이트는 수집한 값을 그대로 보여 줍니다.
-async function fetchSpotifyLive(token) {
+// Spotify가 429(요청이 너무 많음)를 돌려주면 알려 준 시각까지 이 앱의 모든 요청이 거절됩니다. 그 시각을 기억합니다.
+async function rememberSpotifyBlock(response, env) {
+  if (response.status !== 429) return false;
+  const seconds = Math.max(60, Number(response.headers.get('Retry-After')) || 60);
+  await env.LOGINS.put(SPOTIFY_BLOCK_KEY, String(Date.now() + seconds * 1000), { expirationTtl: seconds });
+  return true;
+}
+
+async function fetchSpotifyLive(token, env, recentKey) {
   const api = (path) => fetch(`https://api.spotify.com/v1${path}`, { headers: { Authorization: `Bearer ${token}` } });
-  const [current, recent] = await Promise.all([api('/me/player/currently-playing'), api(`/me/player/recently-played?limit=${LIVE_RECENT_LIMIT}`)]);
-  if (!current.ok || !recent.ok) return null;
+  const cache = globalThis.caches?.default;
+  const current = await api('/me/player/currently-playing');
+  if (await rememberSpotifyBlock(current, env)) return null;
+  if (!current.ok) return null;
   const playing = current.status === 204 ? null : await current.json();
-  const plays = ((await recent.json()).items ?? [])
-    .map(({ track, played_at: playedAt }) => ({
-      ...spotifyTrack(track ?? {}),
-      played_at: Math.floor(Date.parse(playedAt) / 1000),
-      durationSec: track?.duration_ms ? Math.round(track.duration_ms / 1000) : null,
-    }))
-    .filter((item) => item.artist && item.track && item.played_at);
+  let plays = await (await cache?.match(recentKey))?.json();
+  if (!plays) {
+    const recent = await api(`/me/player/recently-played?limit=${LIVE_RECENT_LIMIT}`);
+    if (await rememberSpotifyBlock(recent, env)) return null;
+    if (!recent.ok) return null;
+    plays = ((await recent.json()).items ?? [])
+      .map(({ track, played_at: playedAt }) => ({
+        ...spotifyTrack(track ?? {}),
+        played_at: Math.floor(Date.parse(playedAt) / 1000),
+        durationSec: track?.duration_ms ? Math.round(track.duration_ms / 1000) : null,
+      }))
+      .filter((item) => item.artist && item.track && item.played_at);
+    await cache?.put(recentKey, new Response(JSON.stringify(plays), { headers: { 'Cache-Control': `max-age=${LIVE_RECENT_SECONDS}` } })).catch(() => {});
+  }
   return {
     // 팟캐스트나 일시정지 상태는 재생 중인 곡으로 보지 않습니다.
     nowPlaying: playing?.is_playing && playing.item?.type === 'track' ? spotifyTrack(playing.item) : null,
@@ -158,7 +178,7 @@ async function fetchSpotifyLive(token) {
   };
 }
 
-// 보는 사람이 많아도 Last.fm과 Spotify에는 25초에 한 번만 묻습니다.
+// 보는 사람이 많아도 Last.fm과 Spotify에는 1분에 한 번만 묻습니다.
 async function liveResponse(request, env, url, cors) {
   if (request.headers.get('Origin') !== env.ALLOWED_ORIGIN) return json({ error: 'forbidden' }, 403, cors);
   if (!env.LIVE_KEY || !env.LASTFM_API_KEY) return json({ error: 'not configured' }, 503, cors);
@@ -172,7 +192,13 @@ async function liveResponse(request, env, url, cors) {
   } catch {
     return json({ error: 'bad token' }, 400, cors);
   }
-  const reading = target.startsWith('spotify:') ? fetchSpotifyLive(target.slice('spotify:'.length)) : fetchLive(target, env);
+  const spotify = target.startsWith('spotify:');
+  // Spotify가 막아 둔 동안은 묻지 않습니다(계속 물으면 막힘이 길어질 수 있습니다).
+  const blockedUntil = spotify ? Number(await env.LOGINS.get(SPOTIFY_BLOCK_KEY)) || 0 : 0;
+  if (blockedUntil > Date.now()) {
+    return json({ error: 'spotify blocked', blockedUntil }, 503, { ...cors, 'Cache-Control': `max-age=${LIVE_FAILURE_SECONDS}` });
+  }
+  const reading = spotify ? fetchSpotifyLive(target.slice('spotify:'.length), env, `${url.origin}/recent?t=${encodeURIComponent(url.searchParams.get('t') ?? '')}`) : fetchLive(target, env);
   const live = await reading.catch(() => null);
   if (!live) {
     const failed = json({ error: 'upstream failed' }, 502, { ...cors, 'Cache-Control': `max-age=${LIVE_FAILURE_SECONDS}` });

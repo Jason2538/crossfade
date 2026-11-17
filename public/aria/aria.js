@@ -37,7 +37,7 @@ const SCOPES = [
 // 크로스페이드(app.js)가 로그인 결과를 이 화면으로 넘길 때 이 키로 알아봅니다.
 const KEYS = { token: 'aria_tok', state: 'aria_state', verifier: 'aria_v', recentSearch: 'aria_recent_search' };
 // 다른 기기의 재생 상태를 묻는 간격. 크로스페이드·Luma와 같은 Spotify 앱 한도를 나눠 쓰므로 넉넉히 둡니다.
-const POLL_MS = 5000;
+const POLL_MS = 8000;
 const SEARCH_DELAY_MS = 350;
 const LIKED_LIMIT = 500;
 const PLAYLIST_LIMIT = 500;

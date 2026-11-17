@@ -29,6 +29,12 @@ const SCHEMA = `
     created_at INTEGER NOT NULL
   );
 
+  -- 막힌 시각처럼 수집기가 다음 실행 때 기억해야 할 값입니다.
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
   -- 관리자가 한 일과 그 결과입니다. 관리자 화면에서 반영됐는지 확인합니다.
   CREATE TABLE IF NOT EXISTS admin_log (
     id INTEGER PRIMARY KEY,
@@ -140,6 +146,14 @@ export function removeGroup(db, groupId) {
   db.prepare('DELETE FROM members WHERE group_id = ?').run(groupId);
   db.prepare('DELETE FROM group_notices WHERE group_id = ?').run(groupId);
   return db.prepare('DELETE FROM groups WHERE id = ?').run(groupId).changes > 0;
+}
+
+export function getSetting(db, key) {
+  return db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? null;
+}
+
+export function setSetting(db, key, value) {
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, String(value));
 }
 
 export function getGroup(db, groupId) {

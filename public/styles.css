@@ -2157,3 +2157,8 @@ html.player-full .edge-swipe {
   margin: 0 0 20px;
   color: var(--ink-2);
 }
+
+.notice.warn {
+  border: 1px solid color-mix(in srgb, var(--critical) 35%, transparent);
+  background: color-mix(in srgb, var(--critical) 8%, var(--surface));
+}

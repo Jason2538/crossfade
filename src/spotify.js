@@ -4,11 +4,15 @@ const SCOPES = 'user-read-recently-played user-read-currently-playing';
 const RECENT_LIMIT = 50;
 
 export class SpotifyError extends Error {
-  constructor(status, message) {
+  constructor(status, message, retryAfter = null) {
     super(message);
     this.status = status;
+    // 429 일 때 Spotify가 알려 준 대기 시간(초)
+    this.retryAfter = retryAfter;
   }
 }
+
+const retryAfterOf = (response) => (response.status === 429 ? Number(response.headers.get('Retry-After')) || 60 : null);
 
 export function createSpotifyClient({ clientId, redirectUri, accountsUrl, apiUrl }) {
   async function requestToken(params) {
@@ -20,7 +24,7 @@ export function createSpotifyClient({ clientId, redirectUri, accountsUrl, apiUrl
     });
     const body = await response.json().catch(() => null);
     if (!response.ok || !body?.access_token) {
-      throw new SpotifyError(response.status, body?.error_description ?? 'Spotify 토큰 요청 실패');
+      throw new SpotifyError(response.status, body?.error_description ?? 'Spotify 토큰 요청 실패', retryAfterOf(response));
     }
     return {
       accessToken: body.access_token,
@@ -36,7 +40,7 @@ export function createSpotifyClient({ clientId, redirectUri, accountsUrl, apiUrl
     });
     if (response.status === 204) return null;
     const body = await response.json().catch(() => null);
-    if (!response.ok) throw new SpotifyError(response.status, body?.error?.message ?? 'Spotify 응답 오류');
+    if (!response.ok) throw new SpotifyError(response.status, body?.error?.message ?? 'Spotify 응답 오류', retryAfterOf(response));
     return body;
   }
 
