@@ -1,5 +1,6 @@
 import { disablePush, enablePush, pushSupported, savedPush, syncPush, testPush } from './notify.js';
 import { groupFileId, openSnapshot } from './snapshot.js';
+import { createSwitcher } from './switcher.js';
 import {
   fetchLive,
   finishSpotifyLogin,
@@ -136,8 +137,13 @@ function countUp(node) {
 // 화면은 1분마다 다시 그려집니다. 등장 효과는 다른 화면으로 넘어갈 때만 보여 줍니다.
 function paint(view, ...nodes) {
   const entering = view !== state.view;
+  // 홈 → 친구 상세는 앞으로, 그 반대는 뒤로 미끄러집니다.
+  const depth = (name) => (name?.startsWith('member') ? 1 : 0);
+  const step = entering && state.view ? depth(view) - depth(state.view) : 0;
   state.view = view;
   app.classList.toggle('enter', entering);
+  app.classList.toggle('push', step > 0);
+  app.classList.toggle('pop', step < 0);
   app.replaceChildren(...nodes);
   if (entering && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     app.querySelectorAll('[data-count]').forEach(countUp);
@@ -722,23 +728,78 @@ window.crossfadeFriends = () => {
 
 const equalizer = () => el('span', { class: 'eq', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'));
 
-// 위쪽의 크로스페이드 | Luma | Aria 메뉴입니다.
+// 위쪽의 크로스페이드 | Luma | Aria 메뉴입니다. 흰 선택 표시가 손을 따라 움직입니다.
+const APP_ORDER = ['crossfade', ...Object.keys(PLAYERS)];
+const APP_TITLES = { crossfade: '크로스페이드', ...Object.fromEntries(Object.entries(PLAYERS).map(([name, player]) => [name, player.title])) };
+
+function currentApp() {
+  const name = location.hash.match(/^#\/(\w+)$/)?.[1];
+  return Object.hasOwn(PLAYERS, name ?? '') ? name : 'crossfade';
+}
+
 function appSwitch(active) {
-  const tab = (name, href, label) =>
-    el('a', { href, class: active === name ? 'on' : '', 'aria-current': active === name ? 'page' : null }, label);
-  return el(
-    'nav',
-    { class: 'app-switch', 'aria-label': '앱 전환' },
-    tab('crossfade', '#/', '크로스페이드'),
-    Object.entries(PLAYERS).map(([name, player]) => tab(name, `#/${name}`, player.title)),
-  );
+  const tab = (name) =>
+    el(
+      'a',
+      {
+        href: name === 'crossfade' ? '#/' : `#/${name}`,
+        class: active === name ? 'on' : '',
+        'aria-current': active === name ? 'page' : null,
+        onclick: (event) => {
+          if (name === currentApp() && location.hash.startsWith('#/member')) return;
+          event.preventDefault();
+          if (name === currentApp()) {
+            if (name === 'crossfade' && location.hash !== '#/' && location.hash !== '') location.hash = '#/';
+            return;
+          }
+          switcher.slide(name);
+        },
+      },
+      APP_TITLES[name],
+    );
+  const nav = el('nav', { class: 'app-switch', 'aria-label': '앱 전환' }, el('span', { class: 'switch-thumb', 'aria-hidden': 'true' }), APP_ORDER.map(tab));
+  requestAnimationFrame(() => switcher.placeThumbs(APP_ORDER.indexOf(currentApp()), false));
+  return nav;
 }
 
 const playerViews = {};
+let switchingApps = false;
 
-// name 이 없으면 크로스페이드를 보여 줍니다.
-function showPlayer(name) {
-  if (name && !playerViews[name]) {
+const switcher = createSwitcher({
+  order: APP_ORDER,
+  current: currentApp,
+  // reveal 이면 숨겨 둔 화면을 보이게 해서 끄는 동안 함께 움직입니다.
+  layer(name, reveal = false) {
+    const node = name === 'crossfade' ? app : playerView(name);
+    if (reveal) node.hidden = false;
+    return node;
+  },
+  commit(name) {
+    switchingApps = true;
+    location.hash = name === 'crossfade' ? '#/' : `#/${name}`;
+  },
+  // Aria 안에서 뒤로 갈 화면이 있으면 왼쪽 가장자리 끌기는 Aria가 씁니다.
+  delegate(name) {
+    if (name !== 'aria') return null;
+    try {
+      const back = playerViews.aria?.querySelector('iframe')?.contentWindow?.ariaBack;
+      return back?.can() ? back : null;
+    } catch {
+      return null;
+    }
+  },
+});
+
+// 휴대폰에서는 화면 어디서나, 컴퓨터에서는 위쪽 막대를 끌어서 넘깁니다. Luma·Aria 위에서는 양쪽 가장자리를 씁니다.
+switcher.attach(app, { touchOnly: true });
+for (const side of ['left', 'right']) {
+  const strip = el('div', { class: `edge-swipe ${side}`, 'aria-hidden': 'true' });
+  document.body.append(strip);
+  switcher.attach(strip, { edge: side });
+}
+
+function playerView(name) {
+  if (!playerViews[name]) {
     const player = PLAYERS[name];
     const search = playerCallback?.name === name ? playerCallback.search : '';
     const frame = el('iframe', {
@@ -747,22 +808,27 @@ function showPlayer(name) {
       src: `${player.path}${search}`,
       allow: 'autoplay; encrypted-media; fullscreen; clipboard-write; picture-in-picture',
     });
-    playerViews[name] = el(
-      'div',
-      { class: `luma-view ${player.dark ? 'dark' : 'system'}` },
-      el('header', { class: 'luma-bar' }, el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), appSwitch(name))),
-      frame,
-    );
+    const bar = el('header', { class: 'luma-bar' }, el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), appSwitch(name)));
+    switcher.attach(bar);
+    playerViews[name] = el('div', { class: `luma-view ${player.dark ? 'dark' : 'system'}`, hidden: true }, bar, frame);
     document.body.append(playerViews[name]);
   }
+  return playerViews[name];
+}
+
+// name 이 없으면 크로스페이드를 보여 줍니다.
+function showPlayer(name) {
+  if (name) playerView(name);
   for (const [key, view] of Object.entries(playerViews)) view.hidden = key !== name;
+  document.documentElement.dataset.app = name ?? 'crossfade';
+  requestAnimationFrame(() => switcher.placeThumbs(APP_ORDER.indexOf(name ?? 'crossfade'), false));
   app.hidden = Boolean(name);
   document.documentElement.classList.toggle('luma-open', Boolean(name));
   document.title = name ? `${PLAYERS[name].title} · 크로스페이드` : '크로스페이드';
 }
 
 function header() {
-  return el(
+  const bar = el(
     'header',
     { class: 'topbar' },
     el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), appSwitch('crossfade')),
@@ -785,6 +851,9 @@ function header() {
       el('button', { class: 'btn primary', type: 'button', onclick: openAddDialog }, '친구 추가'),
     ),
   );
+  // 휴대폰은 화면 전체(#app)에서 받으므로 여기서는 마우스만 받습니다.
+  switcher.attach(bar, { mouseOnly: true });
+  return bar;
 }
 
 function demoNotice() {
@@ -2237,7 +2306,9 @@ window.addEventListener('hashchange', async () => {
   const invited = takeInviteCode();
   if (invited && state.session?.static) await joinInvited(invited);
   else if (invited) state.invite = invited;
-  window.scrollTo(0, 0);
+  // 앱을 넘긴 경우에는 크로스페이드에서 보던 위치를 그대로 둡니다.
+  if (!switchingApps) window.scrollTo(0, 0);
+  switchingApps = false;
   render();
 });
 document.addEventListener('visibilitychange', pollLive);

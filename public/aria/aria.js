@@ -477,6 +477,10 @@ async function toggleLike(track) {
   const next = !liked.get(track.id);
   liked.set(track.id, next);
   for (const listener of listeners) listener();
+  np.like?.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.35)' }, { transform: 'scale(0.9)' }, { transform: 'scale(1)' }], {
+    duration: 520,
+    easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+  });
   try {
     await api(`/me/library?uris=${encodeURIComponent(track.uri)}`, { method: next ? 'PUT' : 'DELETE' });
     toast(next ? '좋아요 표시한 곡에 넣었어요' : '좋아요에서 뺐어요', 1800);
@@ -543,14 +547,19 @@ const loaders = {
 };
 
 /* ---------- 화면 구조 ---------- */
+// 화면마다 자기 스크롤을 가진 판(.view)을 만들어 쌓아 둡니다. 뒤로 가면 다시 그리지 않고 그 판을 그대로 보여 줘서
+// 보던 위치가 남고, 넘길 때는 iOS처럼 새 판이 오른쪽에서 들어오고 이전 판은 살짝 왼쪽으로 밀리며 어두워집니다.
 const TABS = [
   { id: 'listen', label: '지금 듣기', icon: 'listen' },
   { id: 'library', label: '보관함', icon: 'library' },
   { id: 'search', label: '검색', icon: 'search' },
 ];
-const nav = { tab: 'listen', stacks: { listen: [{ type: 'listen' }], library: [{ type: 'library' }], search: [{ type: 'search' }] } };
-const scrollMemory = new Map();
+const nav = { tab: 'listen', stacks: { listen: [{ type: 'listen' }], library: [{ type: 'library' }], search: [{ type: 'search' }] }, busy: false };
 const parts = {};
+const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const PUSH_MS = 520;
+const PARALLAX = 0.3;
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function buildShell() {
   parts.page = el('main', { class: 'page', id: 'page' });
@@ -561,7 +570,7 @@ function buildShell() {
     TABS.map((tab) =>
       el(
         'button',
-        { type: 'button', 'data-tab': tab.id, onclick: () => selectTab(tab.id) },
+        { type: 'button', 'data-tab': tab.id, onclick: (event) => selectTab(tab.id, event.currentTarget) },
         icon(tab.icon),
         el('span', {}, tab.label),
       ),
@@ -574,50 +583,191 @@ function buildShell() {
   listeners.add(markPlayingRows);
 }
 
-function selectTab(id) {
-  if (nav.tab === id) {
-    // 같은 탭을 다시 누르면 맨 처음 화면으로 돌아갑니다.
-    nav.stacks[id] = nav.stacks[id].slice(0, 1);
-  } else {
-    scrollMemory.set(nav.tab, parts.page.scrollTop);
-  }
-  nav.tab = id;
-  renderPage();
+const stack = () => nav.stacks[nav.tab];
+const top = () => stack()[stack().length - 1];
+const tabLabel = () => TABS.find((tab) => tab.id === nav.tab).label;
+
+// 판 하나를 만들고 내용을 채웁니다. 위쪽에는 스크롤하면 나타나는 작은 제목 막대가 있습니다.
+function createViewNode(view, depth) {
+  const smallTitle = el('span', { class: 'nav-title' });
+  const back =
+    depth > 0
+      ? el('button', { class: 'back-button', type: 'button', onclick: () => pop() }, icon('back'), el('span', {}, stack()[depth - 1]?.title ?? tabLabel()))
+      : null;
+  const bar = el('div', { class: 'nav-bar' }, el('span', { class: 'nav-side' }, back), smallTitle, el('span', { class: 'nav-side' }));
+  const body = el('div', { class: 'view-body' }, el('div', { class: 'spinner' }));
+  const node = el('div', { class: 'view' }, bar, body);
+  // 큰 제목이 지나가면 작은 제목과 흐린 막대가 나타납니다.
+  node.addEventListener(
+    'scroll',
+    () => {
+      const heading = body.querySelector('.large-title h1, .detail h1');
+      const limit = heading ? heading.offsetTop + heading.offsetHeight - bar.offsetHeight : 40;
+      node.classList.toggle('scrolled', node.scrollTop > Math.max(4, limit));
+    },
+    { passive: true },
+  );
+  view.node = node;
+  fillView(view, body, smallTitle);
+  return node;
 }
 
-function push(view) {
-  scrollMemory.set(`${nav.tab}:${nav.stacks[nav.tab].length}`, parts.page.scrollTop);
-  nav.stacks[nav.tab].push(view);
-  renderPage({ direction: 'forward' });
-}
-
-function pop() {
-  if (nav.stacks[nav.tab].length > 1) nav.stacks[nav.tab].pop();
-  renderPage({ direction: 'back', restore: scrollMemory.get(`${nav.tab}:${nav.stacks[nav.tab].length}`) });
-}
-
-async function renderPage({ direction = 'none', restore = 0 } = {}) {
-  for (const button of parts.tabbar.querySelectorAll('button')) button.classList.toggle('on', button.dataset.tab === nav.tab);
-  const stack = nav.stacks[nav.tab];
-  const view = stack[stack.length - 1];
-  const token = Symbol('render');
-  parts.page.dataset.token = String(Date.now());
-  renderPage.current = token;
-  const content = el('div', { class: `view go-${direction}` });
-  parts.page.replaceChildren(content);
-  parts.page.scrollTop = 0;
-  const back = stack.length > 1 ? el('button', { class: 'back', type: 'button', onclick: pop }, icon('back'), stack[stack.length - 2].title ?? TABS.find((tab) => tab.id === nav.tab).label) : null;
+async function fillView(view, body, smallTitle) {
   try {
     const nodes = await VIEWS[view.type](view);
-    if (renderPage.current !== token) return;
-    content.replaceChildren(...[back, nodes].flat(Infinity).filter(Boolean));
-    if (restore) parts.page.scrollTop = restore;
+    body.replaceChildren(...[nodes].flat(Infinity).filter(Boolean));
+    smallTitle.textContent = view.title ?? tabLabel();
+    body.classList.add('ready');
     markPlayingRows();
   } catch (error) {
-    if (renderPage.current !== token) return;
     if (error.status === 401) return;
-    content.replaceChildren(back ?? '', el('div', { class: 'empty' }, el('b', {}, '불러오지 못했어요'), el('span', {}, error.message)));
+    body.replaceChildren(el('div', { class: 'empty' }, el('b', {}, '불러오지 못했어요'), el('span', {}, error.message)));
   }
+}
+
+function setX(node, x, ms = 0) {
+  node.style.transition = ms ? `transform ${ms}ms ${EASE}, filter ${ms}ms ${EASE}` : 'none';
+  node.style.transform = x ? `translate3d(${x}px, 0, 0)` : '';
+}
+
+function dim(node, amount, ms = 0) {
+  node.style.setProperty('--dim', String(amount));
+  if (ms) node.style.transition += `, --dim ${ms}ms`;
+}
+
+const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms + 30));
+
+function showTab() {
+  for (const button of parts.tabbar.querySelectorAll('button')) button.classList.toggle('on', button.dataset.tab === nav.tab);
+  for (const node of parts.page.children) node.hidden = true;
+  const current = top();
+  if (!current.node) parts.page.append(createViewNode(current, stack().length - 1));
+  current.node.hidden = false;
+  current.node.classList.remove('behind');
+  markPlayingRows();
+}
+
+async function selectTab(id, button) {
+  if (nav.busy) return;
+  // 아이콘이 톡 튀었다가 자리를 잡습니다.
+  button?.querySelector('.ic')?.animate([{ transform: 'scale(1)' }, { transform: 'scale(0.78)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], {
+    duration: 420,
+    easing: 'ease-out',
+  });
+  if (nav.tab === id) {
+    // 같은 탭을 다시 누르면 맨 처음 화면으로, 이미 처음이면 맨 위로 갑니다.
+    if (stack().length > 1) return popToRoot();
+    top().node?.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  nav.tab = id;
+  showTab();
+  const node = top().node;
+  if (!reduceMotion()) node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' });
+}
+
+async function push(view) {
+  if (nav.busy) return;
+  nav.busy = true;
+  const below = top().node;
+  stack().push(view);
+  const node = createViewNode(view, stack().length - 1);
+  parts.page.append(node);
+  if (!reduceMotion()) {
+    const width = parts.page.clientWidth;
+    setX(node, width);
+    node.getBoundingClientRect();
+    setX(node, 0, PUSH_MS);
+    setX(below, -width * PARALLAX, PUSH_MS);
+    below.classList.add('behind');
+    await settle(PUSH_MS);
+  }
+  below.hidden = true;
+  setX(below, 0);
+  setX(node, 0);
+  nav.busy = false;
+}
+
+// from 은 이미 끌어 놓은 거리입니다(가장자리 끌기에서 씁니다).
+async function pop({ from = 0 } = {}) {
+  if (nav.busy || stack().length < 2) return;
+  nav.busy = true;
+  const leaving = stack().pop();
+  const node = leaving.node;
+  const below = top().node;
+  below.hidden = false;
+  if (!reduceMotion()) {
+    const width = parts.page.clientWidth;
+    setX(below, -width * PARALLAX + from * PARALLAX);
+    setX(node, from);
+    below.getBoundingClientRect();
+    below.classList.remove('behind');
+    const ms = Math.max(200, PUSH_MS * (1 - from / width));
+    setX(node, width, ms);
+    setX(below, 0, ms);
+    await settle(ms);
+  } else below.classList.remove('behind');
+  node.remove();
+  setX(below, 0);
+  nav.busy = false;
+  markPlayingRows();
+}
+
+function popToRoot() {
+  while (stack().length > 2) stack().splice(stack().length - 2, 1)[0].node?.remove();
+  return pop();
+}
+
+// 왼쪽 가장자리에서 끌어 뒤로 가기. 크로스페이드가 가장자리 끌기를 이쪽으로 넘겨 줍니다.
+window.ariaBack = {
+  can: () => !nav.busy && !np.open && stack().length > 1,
+  move(dx) {
+    const width = parts.page.clientWidth;
+    const x = Math.max(0, Math.min(width, dx));
+    const below = stack()[stack().length - 2].node;
+    below.hidden = false;
+    setX(top().node, x);
+    setX(below, -width * PARALLAX + x * PARALLAX);
+    below.classList.toggle('behind', x < width * 0.5);
+  },
+  end(dx, speed) {
+    const width = parts.page.clientWidth;
+    const below = stack()[stack().length - 2].node;
+    if (dx > width * 0.35 || speed > 0.4) return pop({ from: Math.max(0, dx) });
+    setX(top().node, 0, 320);
+    setX(below, -width * PARALLAX, 320);
+    below.classList.add('behind');
+    setTimeout(() => {
+      if (stack()[stack().length - 2]?.node === below) below.hidden = true;
+      setX(below, 0);
+    }, 350);
+  },
+};
+
+// 컴퓨터에서도 판 왼쪽 가장자리를 끌어 뒤로 갈 수 있습니다(휴대폰은 크로스페이드의 가장자리 막대가 넘겨 줍니다).
+function attachEdgeBack() {
+  let start = null;
+  parts.page.addEventListener('pointerdown', (event) => {
+    if (event.pointerType !== 'mouse' || event.clientX > 24 || !window.ariaBack.can()) return;
+    start = { x: event.clientX, t: event.timeStamp, id: event.pointerId };
+    parts.page.setPointerCapture(event.pointerId);
+  });
+  parts.page.addEventListener('pointermove', (event) => {
+    if (start?.id === event.pointerId) window.ariaBack.move(event.clientX - start.x);
+  });
+  const end = (event) => {
+    if (start?.id !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    window.ariaBack.end(dx, dx / Math.max(1, event.timeStamp - start.t));
+    start = null;
+  };
+  parts.page.addEventListener('pointerup', end);
+  parts.page.addEventListener('pointercancel', end);
+}
+
+function renderPage() {
+  showTab();
+  attachEdgeBack();
 }
 
 const largeTitle = (text, extra = null) => el('header', { class: 'large-title' }, el('h1', {}, text), extra);
@@ -1121,23 +1271,40 @@ function buildNowPlaying() {
       ),
     ),
   );
-  // 아래로 끌어내리면 닫습니다.
-  let startY = null;
+  // 아래로 끌어내리면 손을 따라 내려오고, 뒤 화면은 그만큼 원래 크기로 돌아옵니다.
+  let drag = null;
   sheet.addEventListener('pointerdown', (event) => {
-    if (event.target.closest('input, .np-lyrics, .np-list')) return;
-    startY = event.clientY;
+    if (event.target.closest('input, button, .np-lyrics, .np-list')) return;
+    drag = { y: event.clientY, x: event.clientX, samples: [[event.timeStamp, event.clientY]], moving: false, id: event.pointerId };
   });
   sheet.addEventListener('pointermove', (event) => {
-    if (startY === null) return;
-    const moved = Math.max(0, event.clientY - startY);
-    sheet.style.transform = `translateY(${moved}px)`;
+    if (!drag || drag.id !== event.pointerId) return;
+    const dy = event.clientY - drag.y;
+    if (!drag.moving) {
+      if (dy < 8 || Math.abs(event.clientX - drag.x) > dy) return;
+      drag.moving = true;
+      sheet.setPointerCapture(event.pointerId);
+      sheet.style.transition = 'none';
+      parts.page.style.transition = 'none';
+    }
+    drag.samples.push([event.timeStamp, event.clientY]);
+    if (drag.samples.length > 6) drag.samples.shift();
+    const moved = Math.max(0, dy);
+    sheet.style.transform = `translate3d(0, ${moved}px, 0)`;
+    pageCard(1 - Math.min(1, moved / innerHeight));
   });
   const end = (event) => {
-    if (startY === null) return;
-    const moved = event.clientY - startY;
-    startY = null;
+    if (!drag || drag.id !== event.pointerId) return;
+    const { moving, samples, y } = drag;
+    drag = null;
+    if (!moving) return;
+    const [t0, y0] = samples[0];
+    const speed = (event.clientY - y0) / Math.max(1, event.timeStamp - t0);
+    sheet.style.transition = '';
+    parts.page.style.transition = '';
     sheet.style.transform = '';
-    if (moved > 140) closeNowPlaying();
+    if (event.clientY - y > innerHeight * 0.25 || speed > 0.5) closeNowPlaying();
+    else pageCard(1);
   };
   sheet.addEventListener('pointerup', end);
   sheet.addEventListener('pointercancel', end);
@@ -1152,17 +1319,70 @@ function paintRange(input) {
   input.style.setProperty('--fill', `${percent}%`);
 }
 
+// 재생 화면이 열린 정도(0~1)만큼 뒤 화면이 카드처럼 작아지고 둥글어집니다.
+function pageCard(amount) {
+  const page = parts.page;
+  if (!amount) {
+    page.style.transform = '';
+    page.style.borderRadius = '';
+    page.style.filter = '';
+    return;
+  }
+  page.style.transform = `scale(${1 - 0.07 * amount}) translateY(${14 * amount}px)`;
+  page.style.borderRadius = `${14 * amount}px`;
+  page.style.filter = `brightness(${1 - 0.25 * amount})`;
+}
+
+// 미니 플레이어의 앨범 아트가 재생 화면의 큰 앨범 아트 자리로 날아가는 효과입니다.
+function flyArtwork(fromRect, toRect, { fromRadius, toRadius, src }) {
+  if (!src || !fromRect.width || !toRect.width || reduceMotion()) return Promise.resolve();
+  const ghost = el('img', { class: 'art-ghost', src, alt: '' });
+  document.body.append(ghost);
+  const frame = (rect, radius) => ({
+    transform: `translate(${rect.left}px, ${rect.top}px)`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    borderRadius: `${radius}px`,
+  });
+  const animation = ghost.animate([frame(fromRect, fromRadius), frame(toRect, toRadius)], { duration: 520, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
+  return animation.finished.catch(() => {}).finally(() => ghost.remove());
+}
+
+// 시트가 다 올라왔을 때 큰 앨범 아트가 놓일 자리입니다(지금 시트가 움직인 만큼 빼서 계산).
+function finalArtRect() {
+  const art = np.art.getBoundingClientRect();
+  const sheet = parts.sheet.getBoundingClientRect();
+  return { left: art.left, top: art.top - sheet.top, width: art.width, height: art.height };
+}
+
 function openNowPlaying() {
+  if (np.open) return;
   np.open = true;
+  const mini = parts.mini.querySelector('.art')?.getBoundingClientRect();
   parts.sheet.classList.add('open');
   parts.sheet.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('np-open');
   renderNowPlaying();
+  pageCard(1);
+  if (mini && np.panel === 'art' && S.track?.cover) {
+    np.art.style.opacity = '0';
+    flyArtwork(mini, finalArtRect(), { fromRadius: 7, toRadius: 12, src: S.track.cover }).then(() => (np.art.style.opacity = ''));
+  }
 }
 
 function closeNowPlaying() {
+  if (!np.open) return;
   np.open = false;
+  const mini = parts.mini.querySelector('.art');
+  if (mini && np.panel === 'art' && S.track?.cover && !parts.sheet.style.transform) {
+    const from = np.art.getBoundingClientRect();
+    mini.style.opacity = '0';
+    flyArtwork(from, mini.getBoundingClientRect(), { fromRadius: 12, toRadius: 7, src: S.track.cover }).then(() => (mini.style.opacity = ''));
+  }
   parts.sheet.classList.remove('open');
   parts.sheet.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('np-open');
+  pageCard(0);
 }
 
 function showPanel(name) {
@@ -1199,7 +1419,14 @@ function renderNowPlaying() {
     checkLiked(track).then(() => renderLike());
   }
   renderLike();
-  np.toggle.replaceChildren(icon(S.paused ? 'play' : 'pause'));
+  if (np.toggle.dataset.state !== String(S.paused)) {
+    np.toggle.dataset.state = String(S.paused);
+    np.toggle.replaceChildren(icon(S.paused ? 'play' : 'pause'));
+    np.toggle.firstChild.animate([{ transform: 'scale(0.4)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], {
+      duration: 380,
+      easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+    });
+  }
   np.toggle.setAttribute('aria-label', S.paused ? '재생' : '일시 정지');
   np.shuffle.classList.toggle('on', S.shuffle);
   np.repeat.classList.toggle('on', S.repeat !== 'off');
