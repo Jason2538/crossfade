@@ -5,3 +5,10 @@ site/
 crossfade.db.enc
 .claude/
 .wrangler/
+
+# 안드로이드: 서명 키는 저장소가 공개라서 올리지 않습니다(GitHub 비밀 값과 이 컴퓨터에만 둡니다).
+android/release.keystore
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

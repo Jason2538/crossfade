@@ -1,0 +1,9 @@
+<resources>
+    <!-- 크로스페이드의 밝은 회색 바탕과 맞춥니다. -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F2F2F7</item>
+        <item name="android:statusBarColor">#F2F2F7</item>
+        <item name="android:navigationBarColor">#F2F2F7</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

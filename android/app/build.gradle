@@ -1,0 +1,47 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 서명 키는 저장소에 없습니다. GitHub Actions 가 비밀 값(ANDROID_KEYSTORE_BASE64)에서 풀어 둔 파일을 씁니다.
+// 같은 키로 서명해야 다음 버전을 지우지 않고 덮어 설치할 수 있습니다.
+def keystorePath = System.getenv('ANDROID_KEYSTORE_PATH') ?: '../release.keystore'
+def keystorePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+def hasKeystore = keystorePassword && file(keystorePath).exists()
+
+android {
+    namespace 'io.github.jason2538.crossfade'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.jason2538.crossfade'
+        minSdk 26
+        targetSdk 34
+        // 빌드할 때마다 번호가 올라가야 덮어 설치가 됩니다.
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int)
+        versionName "1.0.${System.getenv('GITHUB_RUN_NUMBER') ?: '0'}"
+    }
+
+    signingConfigs {
+        release {
+            if (hasKeystore) {
+                storeFile file(keystorePath)
+                storePassword keystorePassword
+                keyAlias 'crossfade'
+                keyPassword keystorePassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // 키가 없으면(비밀 값 등록 전) 시험용 키로 서명합니다. 이 APK는 나중에 정식 키 APK로 덮어 설치할 수 없습니다.
+            signingConfig hasKeystore ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

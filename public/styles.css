@@ -2130,3 +2130,30 @@ html.player-full .luma-view {
 html.player-full .edge-swipe {
   display: none !important;
 }
+
+/* 앱(APK) 로그인을 브라우저에서 마쳤을 때 앱으로 돌려보내는 화면 */
+.handoff {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--page);
+}
+
+.handoff-card {
+  max-width: 360px;
+  padding: 28px 24px;
+  text-align: center;
+}
+
+.handoff-card h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.handoff-card p {
+  margin: 0 0 20px;
+  color: var(--ink-2);
+}
