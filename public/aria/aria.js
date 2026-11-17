@@ -1205,15 +1205,20 @@ function renderMini() {
 }
 
 /* ---------- 지금 재생 중 (전체 화면) ---------- */
-const np = { open: false, panel: 'art', lyrics: null, lyricsFor: null, dragging: false };
+// 휴대폰에서 재생 화면을 열면 처음엔 가사를 보여 주고, 그 뒤로는 마지막에 고른 화면(앨범 아트·가사)을 기억합니다.
+const PANEL_KEY = 'aria_panel';
+const np = { open: false, panel: storage.get(PANEL_KEY) === 'art' ? 'art' : 'lyrics', lyrics: null, lyricsFor: null, dragging: false };
+// 넓은 화면에서는 가사를 오른쪽에 늘 보여 줍니다.
+const wideLayout = () => matchMedia('(min-width: 900px) and (min-height: 560px)').matches;
+const lyricsVisible = () => np.panel === 'lyrics' || wideLayout();
 
 function buildNowPlaying() {
   const sheet = el('section', { class: 'np', 'aria-label': '지금 재생 중', 'aria-hidden': 'true' });
   np.bgA = el('div', { class: 'np-bg' });
   np.close = el('button', { class: 'np-close', type: 'button', 'aria-label': '닫기', onclick: closeNowPlaying }, el('i'));
   np.art = el('div', { class: 'np-art' });
-  np.lyricsBox = el('div', { class: 'np-lyrics', hidden: true });
-  np.listBox = el('div', { class: 'np-list', hidden: true });
+  np.lyricsBox = el('div', { class: 'np-lyrics' });
+  np.listBox = el('div', { class: 'np-list' });
   np.title = el('b', { class: 'np-title' });
   np.artist = el('button', { class: 'np-artist', type: 'button' });
   np.like = el('button', { class: 'np-icon like', type: 'button', 'aria-label': '좋아요' });
@@ -1250,7 +1255,8 @@ function buildNowPlaying() {
       'div',
       { class: 'np-inner' },
       np.close,
-      el('div', { class: 'np-stage' }, np.art, np.lyricsBox, np.listBox),
+      el('div', { class: 'np-stage' }, np.art, np.listBox),
+      np.lyricsBox,
       el(
         'div',
         { class: 'np-controls' },
@@ -1362,9 +1368,11 @@ function openNowPlaying() {
   parts.sheet.classList.add('open');
   parts.sheet.setAttribute('aria-hidden', 'false');
   document.body.classList.add('np-open');
+  applyPanel();
   renderNowPlaying();
+  if (lyricsVisible()) loadLyrics();
   pageCard(1);
-  if (mini && np.panel === 'art' && S.track?.cover) {
+  if (mini && (np.panel === 'art' || wideLayout()) && S.track?.cover) {
     np.art.style.opacity = '0';
     flyArtwork(mini, finalArtRect(), { fromRadius: 7, toRadius: 12, src: S.track.cover }).then(() => (np.art.style.opacity = ''));
   }
@@ -1374,7 +1382,7 @@ function closeNowPlaying() {
   if (!np.open) return;
   np.open = false;
   const mini = parts.mini.querySelector('.art');
-  if (mini && np.panel === 'art' && S.track?.cover && !parts.sheet.style.transform) {
+  if (mini && (np.panel === 'art' || wideLayout()) && S.track?.cover && !parts.sheet.style.transform) {
     const from = np.art.getBoundingClientRect();
     mini.style.opacity = '0';
     flyArtwork(from, mini.getBoundingClientRect(), { fromRadius: 12, toRadius: 7, src: S.track.cover }).then(() => (mini.style.opacity = ''));
@@ -1387,13 +1395,17 @@ function closeNowPlaying() {
 
 function showPanel(name) {
   np.panel = np.panel === name ? 'art' : name;
-  for (const [key, button] of Object.entries(np.tools)) button.classList.toggle('on', np.panel === key);
-  parts.sheet.classList.toggle('panel-open', np.panel !== 'art');
-  np.lyricsBox.hidden = np.panel !== 'lyrics';
-  np.listBox.hidden = np.panel !== 'devices' && np.panel !== 'queue';
-  if (np.panel === 'lyrics') loadLyrics(true);
+  if (np.panel === 'art' || np.panel === 'lyrics') storage.set(PANEL_KEY, np.panel);
+  applyPanel();
+  if (lyricsVisible()) loadLyrics();
   if (np.panel === 'devices') renderDevices();
   if (np.panel === 'queue') renderQueue();
+}
+
+// 어떤 화면을 보여 줄지는 CSS가 data-panel 로 정합니다(휴대폰과 넓은 화면이 다릅니다).
+function applyPanel() {
+  parts.sheet.dataset.panel = np.panel;
+  for (const [key, button] of Object.entries(np.tools)) button.classList.toggle('on', np.panel === key);
 }
 
 function renderNowPlaying() {
@@ -1414,7 +1426,7 @@ function renderNowPlaying() {
     };
     np.lyrics = null;
     np.lyricsFor = null;
-    if (np.panel === 'lyrics') loadLyrics(true);
+    if (lyricsVisible()) loadLyrics(true);
     if (np.panel === 'queue') renderQueue();
     checkLiked(track).then(() => renderLike());
   }
@@ -1453,7 +1465,7 @@ function tick() {
       np.elapsed.textContent = formatTime(now);
       np.remain.textContent = `-${formatTime(S.track.duration - now)}`;
     }
-    if (np.panel === 'lyrics' && np.lyrics?.synced) syncLyrics(now);
+    if (lyricsVisible() && np.lyrics?.synced) syncLyrics(now);
   }
   requestAnimationFrame(tick);
 }

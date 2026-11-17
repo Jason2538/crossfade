@@ -1,6 +1,6 @@
 import { disablePush, enablePush, pushSupported, savedPush, syncPush, testPush } from './notify.js';
 import { groupFileId, openSnapshot } from './snapshot.js';
-import { createSwitcher } from './switcher.js';
+import { createPager } from './switcher.js';
 import {
   fetchLive,
   finishSpotifyLogin,
@@ -728,51 +728,40 @@ window.crossfadeFriends = () => {
 
 const equalizer = () => el('span', { class: 'eq', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'));
 
-// 위쪽의 크로스페이드 | Luma | Aria 메뉴입니다. 흰 선택 표시가 손을 따라 움직입니다.
-const APP_ORDER = ['crossfade', ...Object.keys(PLAYERS)];
-const APP_TITLES = { crossfade: '크로스페이드', ...Object.fromEntries(Object.entries(PLAYERS).map(([name, player]) => [name, player.title])) };
+// 위쪽 가운데에 떠 있는 크로스페이드 | Luma | Aria 막대입니다. Luma의 탭바처럼 누르거나 끌어서 넘깁니다.
+const APPS = [
+  {
+    id: 'crossfade',
+    label: '크로스페이드',
+    icon: ['M12.5 8.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z', 'M2.5 19.5c.6-3.3 3.2-5.5 6.5-5.5s5.9 2.2 6.5 5.5', 'M15.5 5.3a3.5 3.5 0 0 1 0 6.4', 'M18 14.3c1.9.7 3.2 2.6 3.5 5.2'],
+  },
+  {
+    id: 'luma',
+    label: 'Luma',
+    icon: ['M11 3.5c.6 4 2.5 5.9 6.5 6.5-4 .6-5.9 2.5-6.5 6.5-.6-4-2.5-5.9-6.5-6.5 4-.6 5.9-2.5 6.5-6.5z', 'M18.5 15c.3 1.7 1 2.4 2.5 2.7-1.5.3-2.2 1-2.5 2.7-.3-1.7-1-2.4-2.5-2.7 1.5-.3 2.2-1 2.5-2.7z'],
+  },
+  {
+    id: 'aria',
+    label: 'Aria',
+    icon: ['M9 17.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM9 17.5V6l11-2.5v11.5', 'M20 15a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z', 'M9 9.5l11-2.5'],
+  },
+];
 
 function currentApp() {
   const name = location.hash.match(/^#\/(\w+)$/)?.[1];
   return Object.hasOwn(PLAYERS, name ?? '') ? name : 'crossfade';
 }
 
-function appSwitch(active) {
-  const tab = (name) =>
-    el(
-      'a',
-      {
-        href: name === 'crossfade' ? '#/' : `#/${name}`,
-        class: active === name ? 'on' : '',
-        'aria-current': active === name ? 'page' : null,
-        onclick: (event) => {
-          if (name === currentApp() && location.hash.startsWith('#/member')) return;
-          event.preventDefault();
-          if (name === currentApp()) {
-            if (name === 'crossfade' && location.hash !== '#/' && location.hash !== '') location.hash = '#/';
-            return;
-          }
-          switcher.slide(name);
-        },
-      },
-      APP_TITLES[name],
-    );
-  const nav = el('nav', { class: 'app-switch', 'aria-label': '앱 전환' }, el('span', { class: 'switch-thumb', 'aria-hidden': 'true' }), APP_ORDER.map(tab));
-  requestAnimationFrame(() => switcher.placeThumbs(APP_ORDER.indexOf(currentApp()), false));
-  return nav;
-}
-
 const playerViews = {};
 let switchingApps = false;
 
-const switcher = createSwitcher({
-  order: APP_ORDER,
+const pager = createPager({
+  apps: APPS,
   current: currentApp,
-  // reveal 이면 숨겨 둔 화면을 보이게 해서 끄는 동안 함께 움직입니다.
-  layer(name, reveal = false) {
-    const node = name === 'crossfade' ? app : playerView(name);
-    if (reveal) node.hidden = false;
-    return node;
+  // near 이면 끄는 동안 함께 움직일 화면이 필요하므로 아직 안 연 플레이어도 엽니다.
+  layer(name, near) {
+    if (name === 'crossfade') return app;
+    return near || playerViews[name] ? playerView(name) : null;
   },
   commit(name) {
     switchingApps = true;
@@ -790,12 +779,43 @@ const switcher = createSwitcher({
   },
 });
 
-// 휴대폰에서는 화면 어디서나, 컴퓨터에서는 위쪽 막대를 끌어서 넘깁니다. Luma·Aria 위에서는 양쪽 가장자리를 씁니다.
-switcher.attach(app, { touchOnly: true });
+document.body.append(el('div', { class: 'dock-row' }, pager.dock));
+// 친구 상세를 보다가 크로스페이드를 다시 누르면 홈으로 갑니다.
+pager.dock.addEventListener('click', (event) => {
+  if (event.target.closest('button')?.dataset.app === 'crossfade' && currentApp() === 'crossfade' && location.hash.startsWith('#/member')) location.hash = '#/';
+});
+
+// 휴대폰에서는 크로스페이드 화면 어디서나, Luma·Aria 위에서는 양쪽 가장자리를 끌어 넘깁니다.
+pager.attachSwipe(app, { touchOnly: true });
 for (const side of ['left', 'right']) {
   const strip = el('div', { class: `edge-swipe ${side}`, 'aria-hidden': 'true' });
   document.body.append(strip);
-  switcher.attach(strip, { edge: side });
+  pager.attachSwipe(strip, { edge: side });
+}
+
+// 플레이어에서 재생 화면을 열면 위쪽 막대를 치워 재생 화면이 창 전체를 씁니다.
+const fullscreen = {};
+function applyFullscreen() {
+  document.documentElement.classList.toggle('player-full', Boolean(fullscreen[currentApp()]));
+}
+
+function watchFullscreen(name, frame) {
+  frame.addEventListener('load', () => {
+    let body;
+    try {
+      body = frame.contentDocument?.body;
+    } catch {
+      return;
+    }
+    if (!body) return;
+    // Aria는 np-open, Luma는 player-open 을 몸체에 붙입니다.
+    const update = () => {
+      fullscreen[name] = body.classList.contains('np-open') || body.classList.contains('player-open');
+      applyFullscreen();
+    };
+    new MutationObserver(update).observe(body, { attributes: true, attributeFilter: ['class'] });
+    update();
+  });
 }
 
 function playerView(name) {
@@ -808,9 +828,8 @@ function playerView(name) {
       src: `${player.path}${search}`,
       allow: 'autoplay; encrypted-media; fullscreen; clipboard-write; picture-in-picture',
     });
-    const bar = el('header', { class: 'luma-bar' }, el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), appSwitch(name)));
-    switcher.attach(bar);
-    playerViews[name] = el('div', { class: `luma-view ${player.dark ? 'dark' : 'system'}`, hidden: true }, bar, frame);
+    watchFullscreen(name, frame);
+    playerViews[name] = el('div', { class: `luma-view ${player.dark ? 'dark' : 'system'}`, hidden: true }, frame);
     document.body.append(playerViews[name]);
   }
   return playerViews[name];
@@ -821,17 +840,18 @@ function showPlayer(name) {
   if (name) playerView(name);
   for (const [key, view] of Object.entries(playerViews)) view.hidden = key !== name;
   document.documentElement.dataset.app = name ?? 'crossfade';
-  requestAnimationFrame(() => switcher.placeThumbs(APP_ORDER.indexOf(name ?? 'crossfade'), false));
   app.hidden = Boolean(name);
   document.documentElement.classList.toggle('luma-open', Boolean(name));
   document.title = name ? `${PLAYERS[name].title} · 크로스페이드` : '크로스페이드';
+  applyFullscreen();
+  pager.sync();
 }
 
 function header() {
-  const bar = el(
+  return el(
     'header',
     { class: 'topbar' },
-    el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), appSwitch('crossfade')),
+    el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), '크로스페이드'),
     el(
       'div',
       { class: 'topbar-actions' },
@@ -851,9 +871,6 @@ function header() {
       el('button', { class: 'btn primary', type: 'button', onclick: openAddDialog }, '친구 추가'),
     ),
   );
-  // 휴대폰은 화면 전체(#app)에서 받으므로 여기서는 마우스만 받습니다.
-  switcher.attach(bar, { mouseOnly: true });
-  return bar;
 }
 
 function demoNotice() {

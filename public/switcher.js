@@ -1,99 +1,155 @@
-// 크로스페이드 · Luma · Aria 를 손가락이나 마우스로 끌어 넘기는 장치입니다.
-// 끄는 동안 지금 화면과 옆 화면이 손을 따라 움직이고, 놓으면 Apple처럼 감속하며 자리를 잡습니다.
+// 크로스페이드 · Luma · Aria 를 오가는 막대(dock)와 화면 넘기기입니다. Luma의 아래 탭바처럼
+// 흐린 유리 알약 안에서 선택 표시가 스프링처럼 미끄러지고, 막대나 화면을 끌면 표시와 화면이 손을 그대로 따라옵니다.
+// 위치는 0, 1, 2 같은 화면 번호이고, 끄는 동안에는 1.4 처럼 중간 값이 됩니다.
 
-// iOS 화면 전환과 비슷한 감속 곡선입니다.
-export const EASE_OUT = 'cubic-bezier(0.22, 1, 0.36, 1)';
-const SLIDE_MS = 480;
-const SNAP_MS = 380;
-// 이만큼 끌거나(화면 너비 대비) 이만큼 빠르게(px/ms) 밀면 넘깁니다.
-const COMMIT_RATIO = 0.28;
-const COMMIT_SPEED = 0.45;
+const SVG = 'http://www.w3.org/2000/svg';
+// 스프링: 단단함과 감쇠. 살짝 튕기며 멈춥니다(Luma 탭 표시와 비슷한 느낌).
+const STIFFNESS = 260;
+const DAMPING = 28;
 const START_PX = 8;
+const FLICK_SPEED = 0.45; // px/ms
+const RUBBER = 0.25;
 
-const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+function svgIcon(paths) {
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of paths) {
+    const path = document.createElementNS(SVG, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
 
-export function createSwitcher({ order, current, layer, commit, delegate = () => null }) {
-  let busy = false;
+export function createPager({ apps, current, layer, commit, delegate = () => null }) {
+  const order = apps.map((app) => app.id);
+  let position = order.indexOf(current());
+  let animation = null;
+  let dragging = false;
+  let safety = 0;
 
-  const neighbour = (name, step) => order[order.indexOf(name) + step] ?? null;
+  /* ---------- 막대 ---------- */
+  const indicator = document.createElement('span');
+  indicator.className = 'dock-ind';
+  const buttons = apps.map((app, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.app = app.id;
+    const label = document.createElement('span');
+    label.textContent = app.label;
+    button.append(svgIcon(app.icon), label);
+    button.addEventListener('click', () => go(index));
+    return button;
+  });
+  const dock = document.createElement('nav');
+  dock.className = 'dock';
+  dock.setAttribute('aria-label', '앱 전환');
+  dock.append(indicator, ...buttons);
 
-  // 위쪽 메뉴의 흰 알약(선택 표시)을 index 위치로 옮깁니다. index 는 1.4 처럼 중간 값일 수 있습니다.
-  function placeThumbs(index, animate = true) {
-    for (const nav of document.querySelectorAll('.app-switch')) {
-      const tabs = [...nav.querySelectorAll('a')];
-      const thumb = nav.querySelector('.switch-thumb');
-      if (!thumb || !tabs.length) continue;
-      const low = Math.max(0, Math.min(tabs.length - 1, Math.floor(index)));
-      const high = Math.min(tabs.length - 1, low + 1);
-      const t = Math.max(0, Math.min(1, index - low));
-      const left = tabs[low].offsetLeft + (tabs[high].offsetLeft - tabs[low].offsetLeft) * t;
-      const width = tabs[low].offsetWidth + (tabs[high].offsetWidth - tabs[low].offsetWidth) * t;
-      thumb.style.transition = animate ? `transform ${SLIDE_MS}ms ${EASE_OUT}, width ${SLIDE_MS}ms ${EASE_OUT}` : 'none';
-      thumb.style.width = `${width}px`;
-      thumb.style.transform = `translateX(${left}px)`;
-      const active = Math.round(index);
-      tabs.forEach((tab, i) => tab.classList.toggle('on', i === active));
-    }
+  // 선택 표시를 화면 번호 p 위치에 놓습니다. 버튼 사이에서는 위치와 너비를 섞습니다.
+  function placeIndicator(p, { stretch = false } = {}) {
+    if (!buttons[0].offsetWidth) return;
+    const last = buttons.length - 1;
+    const low = Math.max(0, Math.min(last, Math.floor(p)));
+    const high = Math.min(last, low + 1);
+    const t = Math.max(0, Math.min(1, p - low));
+    const a = buttons[low];
+    const b = buttons[high];
+    const left = a.offsetLeft + (b.offsetLeft - a.offsetLeft) * t;
+    const width = a.offsetWidth + (b.offsetWidth - a.offsetWidth) * t;
+    // 바깥으로 더 끌면 고무줄처럼 조금만 나갑니다.
+    const overflow = p < 0 ? p * a.offsetWidth * 0.5 : p > last ? (p - last) * b.offsetWidth * 0.5 : 0;
+    indicator.style.width = `${width}px`;
+    indicator.style.transform = `translateX(${left + overflow}px) scale(${stretch ? 1.06 : 1})`;
+    const active = Math.max(0, Math.min(last, Math.round(p)));
+    buttons.forEach((button, i) => {
+      button.classList.toggle('on', i === active);
+      button.setAttribute('aria-current', i === active ? 'page' : 'false');
+    });
   }
 
-  function setX(node, x, ms = 0, easing = EASE_OUT) {
-    node.style.transition = ms ? `transform ${ms}ms ${easing}` : 'none';
-    node.style.transform = x ? `translate3d(${x}px, 0, 0)` : '';
-  }
-
-  function clear(...nodes) {
-    for (const node of nodes) {
-      node.style.transition = '';
-      node.style.transform = '';
-      node.style.willChange = '';
-    }
-  }
-
-  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms + 40));
-
-  // from 화면에서 to 화면으로 넘깁니다. dx 는 이미 끈 거리입니다.
-  async function slide(to, { dx = 0, speed = 0 } = {}) {
-    const from = current();
-    if (busy || !to || to === from) return;
-    busy = true;
-    const dir = order.indexOf(to) > order.indexOf(from) ? 1 : -1;
+  /* ---------- 화면 ---------- */
+  // p 위치에 맞춰 화면들을 옆으로 놓습니다. 걸쳐 있는 두 화면만 보입니다.
+  function placeScreens(p) {
     const width = innerWidth;
-    const a = layer(from);
-    const b = layer(to, true);
-    a.style.willChange = b.style.willChange = 'transform';
-    setX(a, dx);
-    setX(b, dx + dir * width);
-    await nextFrame();
-    // 빠르게 밀었으면 그만큼 짧게 끝냅니다.
-    const remaining = 1 - Math.min(1, Math.abs(dx) / width);
-    const ms = Math.max(220, Math.min(SLIDE_MS, (remaining * width) / Math.max(Math.abs(speed), 0.0001), SLIDE_MS * remaining + 180));
-    setX(a, -dir * width, ms);
-    setX(b, 0, ms);
-    placeThumbs(order.indexOf(to));
-    await wait(ms);
-    clear(a, b);
-    busy = false;
-    commit(to);
+    order.forEach((name, i) => {
+      const distance = i - p;
+      const near = Math.abs(distance) < 1;
+      const node = layer(name, near);
+      if (!node) return;
+      if (near) {
+        node.hidden = false;
+        node.style.transform = Math.abs(distance) > 0.0001 ? `translate3d(${distance * width}px, 0, 0)` : '';
+      } else {
+        node.style.transform = '';
+        node.hidden = true;
+      }
+    });
   }
 
-  async function snapBack(dx, neighbourName) {
-    const from = current();
-    const a = layer(from);
-    const b = neighbourName ? layer(neighbourName) : null;
-    const dir = dx < 0 ? 1 : -1;
-    setX(a, 0, SNAP_MS);
-    if (b) setX(b, dir * innerWidth, SNAP_MS);
-    placeThumbs(order.indexOf(from));
-    await wait(SNAP_MS);
-    clear(a);
-    if (b) {
-      clear(b);
-      b.hidden = true;
+  function clearScreens() {
+    for (const name of order) {
+      const node = layer(name, false);
+      if (node) node.style.transform = '';
     }
   }
 
-  // node 위에서 가로로 끌면 화면을 넘깁니다. edge 가 'left' 면 그 화면 안쪽으로 먼저 물어봅니다.
-  // 끄는 도중 화면이 다시 그려져 node 가 바뀌어도 놓치지 않도록, 움직임과 손 떼기는 문서 전체에서 받습니다.
+  function render(p, options) {
+    position = p;
+    placeScreens(p);
+    placeIndicator(p, options);
+  }
+
+  // 목표 번호까지 스프링으로 움직이고, 도착하면 그 화면으로 확정합니다. velocity 는 화면 번호/초.
+  function animateTo(target, velocity = 0) {
+    cancelAnimationFrame(animation);
+    let p = position;
+    let v = velocity;
+    let last = performance.now();
+    document.documentElement.classList.add('paging');
+    const finish = () => {
+      clearTimeout(safety);
+      cancelAnimationFrame(animation);
+      render(target);
+      clearScreens();
+      document.documentElement.classList.remove('paging');
+      animation = null;
+      if (order[target] !== current()) commit(order[target]);
+    };
+    // 화면이 버벅여 프레임이 드물게 와도 실제 지난 시간만큼 계산하므로 제시간에 도착합니다.
+    const step = (now) => {
+      let elapsed = Math.min(0.25, (now - last) / 1000);
+      last = now;
+      while (elapsed > 0) {
+        const h = Math.min(1 / 240, elapsed);
+        v += (-STIFFNESS * (p - target) - DAMPING * v) * h;
+        p += v * h;
+        elapsed -= h;
+      }
+      if (Math.abs(p - target) < 0.0015 && Math.abs(v) < 0.01) return finish();
+      render(p);
+      animation = requestAnimationFrame(step);
+    };
+    // 탭이 뒤로 가 프레임이 멈춰도 결국은 도착합니다.
+    clearTimeout(safety);
+    safety = setTimeout(finish, 1200);
+    animation = requestAnimationFrame(step);
+  }
+
+  function go(index) {
+    if (dragging) return;
+    animateTo(Math.max(0, Math.min(order.length - 1, index)));
+  }
+
+  // 해시가 바뀌는 등 밖에서 화면이 정해졌을 때 맞춥니다.
+  function sync() {
+    if (animation || dragging) return;
+    position = order.indexOf(current());
+    placeIndicator(position);
+  }
+
+  /* ---------- 끌기 ---------- */
   let suppressClick = false;
   window.addEventListener(
     'click',
@@ -105,18 +161,19 @@ export function createSwitcher({ order, current, layer, commit, delegate = () =>
     true,
   );
 
-  function attach(node, { touchOnly = false, mouseOnly = false, edge = null } = {}) {
-    node.addEventListener('pointerdown', (event) => {
-      if (busy || event.button > 0 || (touchOnly && event.pointerType === 'mouse') || (mouseOnly && event.pointerType !== 'mouse')) return;
-      if (event.target.closest('input, select, textarea, dialog, .shelf, .no-swipe')) return;
-      track(event, edge);
-    });
-  }
+  const withRubber = (p) => {
+    const max = order.length - 1;
+    if (p < 0) return p * RUBBER;
+    if (p > max) return max + (p - max) * RUBBER;
+    return p;
+  };
 
-  function track(down, edge) {
-    const start = { x: down.clientX, y: down.clientY, id: down.pointerId, samples: [[down.timeStamp, down.clientX]] };
-    let drag = null;
+  // 손가락 위치를 화면 번호로 바꾸는 방법(toPosition)만 다르고, 따라가기·놓기는 같습니다.
+  function track(down, { toPosition, edge = null }) {
     const root = document.documentElement;
+    const start = { x: down.clientX, y: down.clientY, id: down.pointerId, p: position, samples: [[down.timeStamp, down.clientX]] };
+    let mode = null; // 'page' | 'inner'
+    let inner = null;
 
     const move = (event) => {
       if (event.pointerId !== start.id) return;
@@ -124,14 +181,17 @@ export function createSwitcher({ order, current, layer, commit, delegate = () =>
       const dy = event.clientY - start.y;
       start.samples.push([event.timeStamp, event.clientX]);
       if (start.samples.length > 6) start.samples.shift();
-      if (!drag) {
+      if (!mode) {
         if (Math.abs(dy) > START_PX && Math.abs(dy) > Math.abs(dx)) return stop();
         if (Math.abs(dx) < START_PX) return;
-        // 왼쪽 가장자리에서 오른쪽으로 끌 때, 그 화면이 뒤로 갈 수 있으면 화면 안에서 처리합니다.
-        const inner = edge === 'left' && dx > 0 ? delegate(current()) : null;
-        drag = { inner, from: current(), neighbour: inner ? null : neighbour(current(), dx < 0 ? 1 : -1) };
-        if (!inner && drag.neighbour) layer(drag.neighbour, true);
-        // 마우스가 Luma·Aria 화면(다른 문서) 위로 지나가도 계속 받도록 문서 전체가 잡습니다.
+        // 왼쪽 가장자리에서 오른쪽으로 끌면, 그 앱 안에서 뒤로 갈 곳이 있으면 그쪽이 먼저입니다.
+        inner = edge === 'left' && dx > 0 ? delegate(current()) : null;
+        mode = inner ? 'inner' : 'page';
+        cancelAnimationFrame(animation);
+        clearTimeout(safety);
+        animation = null;
+        dragging = mode === 'page';
+        dock.classList.toggle('dragging', dragging);
         try {
           root.setPointerCapture(event.pointerId);
         } catch {
@@ -139,30 +199,33 @@ export function createSwitcher({ order, current, layer, commit, delegate = () =>
         }
       }
       event.preventDefault();
-      if (drag.inner) return drag.inner.move(dx);
-      // 넘길 화면이 없으면 고무줄처럼 덜 움직입니다.
-      const x = drag.neighbour ? dx : dx * 0.25;
-      setX(layer(drag.from), x);
-      if (drag.neighbour) {
-        const dir = order.indexOf(drag.neighbour) > order.indexOf(drag.from) ? 1 : -1;
-        setX(layer(drag.neighbour), x + dir * innerWidth);
-        placeThumbs(order.indexOf(drag.from) + -x / innerWidth, false);
-      }
+      if (mode === 'inner') return inner.move(dx);
+      render(withRubber(toPosition(event.clientX, start)), { stretch: true });
     };
 
     const end = (event) => {
       if (event.pointerId !== start.id) return;
       stop();
-      if (!drag) return;
-      const dx = event.clientX - start.x;
-      const [t0, x0] = start.samples[0];
-      const speed = (event.clientX - x0) / Math.max(1, event.timeStamp - t0);
+      if (!mode) return;
       suppressClick = true;
       setTimeout(() => (suppressClick = false), 60);
-      if (drag.inner) return drag.inner.end(dx, speed);
-      const forward = Math.abs(dx) > innerWidth * COMMIT_RATIO || (Math.abs(speed) > COMMIT_SPEED && Math.sign(speed) === Math.sign(dx));
-      if (drag.neighbour && forward && event.type !== 'pointercancel') slide(drag.neighbour, { dx, speed });
-      else snapBack(dx, drag.neighbour);
+      const dx = event.clientX - start.x;
+      const [t0, x0] = start.samples[0];
+      const speed = (event.clientX - x0) / Math.max(1, event.timeStamp - t0); // px/ms
+      if (mode === 'inner') return inner.end(dx, speed);
+      dragging = false;
+      dock.classList.remove('dragging');
+      // 화면 번호로 바꾼 속도(번호/초). 막대와 화면은 손 방향이 반대라 toPosition 으로 환산합니다.
+      const perPx = toPosition(event.clientX + 1, start) - toPosition(event.clientX, start);
+      const velocity = speed * 1000 * perPx;
+      let target = Math.round(position);
+      if (Math.abs(speed) > FLICK_SPEED && event.type !== 'pointercancel') {
+        target = velocity > 0 ? Math.ceil(position - 0.05) : Math.floor(position + 0.05);
+        // 화면을 한 번 튕기면 한 칸만 넘어갑니다.
+        target = Math.max(Math.round(start.p) - 1, Math.min(Math.round(start.p) + 1, target));
+      }
+      target = Math.max(0, Math.min(order.length - 1, target));
+      animateTo(target, Math.max(-12, Math.min(12, velocity)));
     };
 
     function stop() {
@@ -181,5 +244,34 @@ export function createSwitcher({ order, current, layer, commit, delegate = () =>
     window.addEventListener('pointercancel', end);
   }
 
-  return { slide, attach, placeThumbs };
+  // 막대 위에서 끌면 선택 표시가 손가락 바로 아래로 오고, 화면도 그만큼 넘어갑니다(Luma 탭바와 같음).
+  dock.addEventListener('pointerdown', (event) => {
+    if (event.button > 0) return;
+    const centers = buttons.map((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.left + rect.width / 2;
+    });
+    const last = centers.length - 1;
+    track(event, {
+      toPosition(x) {
+        if (x <= centers[0]) return (x - centers[0]) / (centers[1] - centers[0]);
+        for (let i = 0; i < last; i += 1) if (x <= centers[i + 1]) return i + (x - centers[i]) / (centers[i + 1] - centers[i]);
+        return last + (x - centers[last]) / (centers[last] - centers[last - 1]);
+      },
+    });
+  });
+
+  // 화면 위에서 끌면 손가락이 움직인 만큼 화면이 따라옵니다.
+  function attachSwipe(node, { touchOnly = false, edge = null } = {}) {
+    node.addEventListener('pointerdown', (event) => {
+      if (event.button > 0 || (touchOnly && event.pointerType === 'mouse')) return;
+      if (event.target.closest('input, select, textarea, dialog, .shelf, .no-swipe, .dock')) return;
+      track(event, { toPosition: (x, start) => start.p - (x - start.x) / innerWidth, edge });
+    });
+  }
+
+  addEventListener('resize', () => placeIndicator(position));
+  requestAnimationFrame(() => placeIndicator(position));
+
+  return { dock, attachSwipe, sync };
 }

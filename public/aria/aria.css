@@ -926,14 +926,45 @@ body.has-mini .view-body {
   transform: scale(0.8);
 }
 
-.np.panel-open .np-art {
+/* 휴대폰: 앨범 아트 · 가사 · 목록 중 하나를 같은 자리에 보여 줍니다. */
+.np-lyrics {
+  display: none;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.np[data-panel='lyrics'] .np-stage {
   display: none;
 }
 
-.np-lyrics,
+.np[data-panel='lyrics'] .np-lyrics {
+  display: block;
+}
+
+.np-list {
+  display: none;
+}
+
+.np[data-panel='queue'] .np-list,
+.np[data-panel='devices'] .np-list {
+  display: block;
+}
+
+.np[data-panel='queue'] .np-art,
+.np[data-panel='devices'] .np-art {
+  display: none;
+}
+
 .np-list {
   position: absolute;
   inset: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(180deg, transparent, #000 8%, #000 86%, transparent);
+}
+
+.np-lyrics {
   overflow-y: auto;
   scrollbar-width: none;
   mask-image: linear-gradient(180deg, transparent, #000 8%, #000 86%, transparent);
@@ -1247,28 +1278,51 @@ body.has-mini .view-body {
   text-overflow: ellipsis;
 }
 
-/* 넓은 화면에서는 앨범 아트와 조작을 나란히 */
+/* 넓은 화면: 왼쪽에 앨범 아트와 조작, 오른쪽에 가사를 늘 보여 줍니다. */
 @media (min-width: 900px) and (min-height: 560px) {
   .np-inner {
     display: grid;
-    grid-template-columns: 1fr 400px;
-    grid-template-rows: auto 1fr;
-    column-gap: 60px;
-    align-items: center;
-    max-width: 1100px;
-    padding-inline: 60px;
+    grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    column-gap: 72px;
+    max-width: 1180px;
+    padding-inline: 56px;
   }
 
   .np-close {
     grid-column: 1 / -1;
   }
 
-  .np-stage {
-    height: 100%;
+  .np-stage,
+  .np[data-panel='lyrics'] .np-stage {
+    display: flex;
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .np-controls {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .np-lyrics,
+  .np[data-panel='lyrics'] .np-lyrics {
+    display: block;
+    grid-column: 2;
+    grid-row: 2 / 4;
   }
 
   .np-art {
-    width: min(100%, 62vh);
+    width: min(100%, 50vh);
+  }
+
+  .lines {
+    padding: 22vh 4% 36vh 0;
+  }
+
+  /* 넓은 화면에서는 가사가 늘 보이므로 가사 버튼은 필요 없습니다. */
+  .np-tool[aria-label='가사'] {
+    visibility: hidden;
   }
 }
 

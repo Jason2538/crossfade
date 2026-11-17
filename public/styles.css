@@ -116,7 +116,7 @@ a {
 
 .topbar {
   position: sticky;
-  top: 0;
+  top: var(--dock-h);
   z-index: 5;
   display: flex;
   align-items: center;
@@ -1819,8 +1819,9 @@ dialog .group-code {
 
 .luma-view {
   position: fixed;
-  inset: 0;
+  inset: var(--dock-h) 0 0;
   z-index: 20;
+  transition: inset 0.5s var(--ease-out);
   display: flex;
   flex-direction: column;
   background: #0e0e10;
@@ -1948,7 +1949,7 @@ html.luma-open body {
 @media (pointer: coarse) {
   html:not([data-app='crossfade']) .edge-swipe {
     position: fixed;
-    top: 52px;
+    top: var(--dock-h);
     bottom: 0;
     z-index: 25;
     display: block;
@@ -1963,4 +1964,169 @@ html.luma-open body {
   .edge-swipe.right {
     right: 0;
   }
+}
+
+/* ---------- 앱 전환 막대 (Luma 탭바 모양) ---------- */
+:root {
+  --dock-h: calc(60px + env(safe-area-inset-top));
+}
+
+body {
+  padding-top: var(--dock-h);
+}
+
+.dock-row {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--dock-h);
+  padding-top: env(safe-area-inset-top);
+  background: var(--bar);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  transition:
+    transform 0.5s var(--ease-out),
+    opacity 0.35s ease,
+    background 0.35s ease;
+}
+
+/* 막대 뒤 바탕은 지금 보고 있는 앱 색을 따라갑니다. */
+html[data-app='luma'] .dock-row {
+  background: #0e0e10;
+}
+
+html[data-app='aria'] .dock-row {
+  background: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-app='aria'] .dock-row {
+    background: #000;
+  }
+}
+
+.dock {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(30, 28, 26, 0.78);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: dock-in 0.8s var(--ease-out) both;
+}
+
+@keyframes dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.96);
+  }
+}
+
+.dock button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: rgba(244, 241, 236, 0.62);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 0.4s,
+    scale 0.4s var(--spring);
+}
+
+.dock button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.5s var(--spring);
+}
+
+.dock button.on {
+  color: #f4f1ec;
+}
+
+.dock button.on svg {
+  transform: scale(1.08);
+}
+
+.dock button:active {
+  scale: 0.9;
+}
+
+/* 선택 표시: 반투명 바탕에 흰 테두리. 위치는 switcher.js 가 손을 따라 매 순간 정합니다. */
+.dock-ind {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  z-index: 0;
+  width: 0;
+  height: calc(100% - 10px);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.13);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.82);
+  transition:
+    transform 0.55s cubic-bezier(0.34, 1.25, 0.5, 1),
+    width 0.55s cubic-bezier(0.34, 1.25, 0.5, 1);
+}
+
+html.paging .dock-ind,
+.dock.dragging .dock-ind {
+  transition: none;
+}
+
+.dock.dragging {
+  cursor: grabbing;
+}
+
+@media (max-width: 400px) {
+  .dock button {
+    gap: 5px;
+    padding: 8px 11px;
+    font-size: 13px;
+  }
+
+  .dock button svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+/* 재생 화면을 열면 막대가 위로 사라지고 플레이어가 창 전체를 씁니다. */
+html.player-full .dock-row {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-100%);
+}
+
+html.player-full .luma-view {
+  inset: 0;
+}
+
+html.player-full .edge-swipe {
+  display: none !important;
 }
