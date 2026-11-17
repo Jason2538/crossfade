@@ -148,7 +148,8 @@ const redirectUri = () => location.origin + location.pathname.replace(/aria\/(in
 async function loadClientId() {
   try {
     const site = await (await fetch(`../site.json?t=${Date.now()}`, { cache: 'no-store' })).json();
-    const id = site?.connect?.playerClientId ?? site?.connect?.spotifyClientId;
+    // Aria 전용 Spotify 앱 키(없으면 플레이어 키, 그것도 없으면 크로스페이드 키)
+    const id = site?.connect?.ariaClientId ?? site?.connect?.playerClientId ?? site?.connect?.spotifyClientId;
     if (id) clientId = id;
   } catch {
     // 로컬 시험처럼 site.json 이 없으면 기본 값을 씁니다.

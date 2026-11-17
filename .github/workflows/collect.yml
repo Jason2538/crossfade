@@ -65,6 +65,8 @@ jobs:
           LIVE_KEY: ${{ secrets.LIVE_KEY }}
           SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
           PLAYER_SPOTIFY_CLIENT_ID: ${{ vars.PLAYER_SPOTIFY_CLIENT_ID }}
+          LUMA_SPOTIFY_CLIENT_ID: ${{ vars.LUMA_SPOTIFY_CLIENT_ID }}
+          ARIA_SPOTIFY_CLIENT_ID: ${{ vars.ARIA_SPOTIFY_CLIENT_ID }}
           RELAY_URL: ${{ vars.RELAY_URL }}
           OPEN_ACCESS: ${{ vars.OPEN_ACCESS }}
           RELAY_READ_KEY: ${{ secrets.RELAY_READ_KEY }}

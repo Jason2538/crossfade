@@ -346,6 +346,9 @@ async function main() {
         spotifyClientId: config.spotifyClientId,
         // Luma·Aria 플레이어는 요청이 많아서 다른 Spotify 앱 키를 씁니다. 친구 기록 수집과 할당량을 나누기 위해서입니다.
         playerClientId: (process.env.PLAYER_SPOTIFY_CLIENT_ID ?? '').trim() || config.spotifyClientId,
+        // Luma와 Aria도 서로 다른 앱 키를 써서 할당량을 나눕니다(없으면 위의 플레이어 키).
+        lumaClientId: (process.env.LUMA_SPOTIFY_CLIENT_ID ?? '').trim() || undefined,
+        ariaClientId: (process.env.ARIA_SPOTIFY_CLIENT_ID ?? '').trim() || undefined,
         tokenPublicKey: publicKeyJwk(tokenPrivateKey),
       },
     }),

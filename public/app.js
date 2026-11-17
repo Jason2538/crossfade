@@ -210,8 +210,8 @@ async function fetchSiteConfig() {
     const response = await fetch(`site.json?t=${Date.now()}`, { cache: 'no-store' });
     const site = response.ok ? await response.json() : null;
     siteBuild = site?.build ?? null;
-    // Luma 화면이 이 값으로 Spotify에 로그인합니다.
-    window.crossfadePlayerClientId = site?.connect?.playerClientId ?? site?.connect?.spotifyClientId ?? null;
+    // Luma 화면이 이 값(Luma용 Spotify 앱 키)으로 로그인합니다.
+    window.crossfadePlayerClientId = site?.connect?.lumaClientId ?? site?.connect?.playerClientId ?? site?.connect?.spotifyClientId ?? null;
     return site;
   } catch {
     return null;
