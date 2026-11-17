@@ -209,9 +209,67 @@ async function fetchSealed(code) {
 }
 
 async function unlock(sealed, code) {
-  state.snapshot = await openSnapshot(sealed, code);
+  state.snapshot = hideRemoved(await openSnapshot(sealed, code));
   state.snapshotCode = code;
   state.snapshotLoadedAt = Date.now();
+}
+
+// 관리자가 뺀 멤버는 수집과 배포가 끝나기 전에도 이 기기 화면에서 바로 숨깁니다.
+// 새 기록에서 그 멤버가 사라지면 숨김 목록에서도 지웁니다.
+const REMOVED_STORAGE_KEY = 'crossfade.removedMembers';
+const REMOVED_KEEP_MS = 30 * 60 * 1000;
+
+function removedMembers() {
+  try {
+    const list = JSON.parse(localStorage.getItem(REMOVED_STORAGE_KEY)) ?? [];
+    return list.filter((entry) => Date.now() - entry.at < REMOVED_KEEP_MS);
+  } catch {
+    return [];
+  }
+}
+
+function saveRemoved(list) {
+  try {
+    if (list.length) localStorage.setItem(REMOVED_STORAGE_KEY, JSON.stringify(list));
+    else localStorage.removeItem(REMOVED_STORAGE_KEY);
+  } catch {
+    // 저장하지 못하면 이번 화면에서만 숨깁니다.
+  }
+}
+
+function rememberRemoved(memberId) {
+  saveRemoved([...removedMembers().filter((entry) => entry.id !== memberId), { id: memberId, at: Date.now() }]);
+  if (state.snapshot) state.snapshot = hideRemoved(state.snapshot);
+  state.live.delete(memberId);
+}
+
+function hideRemoved(snapshot) {
+  const removed = removedMembers();
+  const present = new Set(snapshot.overview[0].members.map((member) => member.id));
+  const still = removed.filter((entry) => present.has(entry.id));
+  if (still.length !== removed.length) saveRemoved(still);
+  if (!still.length) return snapshot;
+  const gone = new Set(still.map((entry) => entry.id));
+  const keep = (id) => !gone.has(Number(id));
+  const social = snapshot.social && {
+    ...snapshot.social,
+    members: Object.fromEntries(Object.entries(snapshot.social.members).filter(([id]) => keep(id))),
+    activity: snapshot.social.activity.filter((item) => keep(item.memberId)),
+    pairs: snapshot.social.pairs.filter((pair) => keep(pair.a) && keep(pair.b)),
+    groupTop: Object.fromEntries(
+      Object.entries(snapshot.social.groupTop).map(([kind, items]) => [
+        kind,
+        items.map((item) => ({ ...item, listeners: item.listeners.filter(keep) })).filter((item) => item.listeners.length),
+      ]),
+    ),
+  };
+  return {
+    ...snapshot,
+    social,
+    liveTokens: Object.fromEntries(Object.entries(snapshot.liveTokens ?? {}).filter(([id]) => keep(id))),
+    overview: snapshot.overview.map((week) => ({ ...week, members: week.members.filter((member) => keep(member.id)) })),
+    members: Object.fromEntries(Object.entries(snapshot.members).filter(([id]) => keep(id))),
+  };
 }
 
 function invalidCode(message) {
@@ -1571,6 +1629,7 @@ function watchAdmin(sentAt, tries = COLLECT_WATCH_TRIES) {
     if (summary && summary.generatedAt > sentAt) {
       admin.summary = summary;
       admin.pending = [];
+      if (state.snapshotCode) await reloadSnapshot();
       admin.watch = null;
       admin.flash = '반영됐어요. 아래 관리 기록에서 결과를 확인하세요.';
       if (isAdminView()) renderAdmin();
@@ -1591,6 +1650,7 @@ function watchAdmin(sentAt, tries = COLLECT_WATCH_TRIES) {
 async function adminSend(request, label) {
   const { admin } = state;
   await sendToCollector(state.connect, { kind: 'admin', password: admin.password, ...request });
+  if (request.action === 'removeMember') rememberRemoved(request.memberId);
   admin.pending.push(label);
   admin.flash = null;
   const sentAt = Math.floor(Date.now() / 1000);
