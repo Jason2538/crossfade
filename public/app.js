@@ -2284,6 +2284,8 @@ async function render() {
   }
   const playerName = location.hash.match(/^#\/(\w+)$/)?.[1];
   const onPlayer = Object.hasOwn(PLAYERS, playerName ?? '') ? playerName : null;
+  // 플레이어를 처음 열 때 배포 버전을 먼저 알아 둡니다(예전 플레이어 파일을 쓰지 않도록).
+  if (onPlayer && !playerViews[onPlayer] && siteBuild === null) await fetchSiteConfig();
   showPlayer(onPlayer);
   if (onPlayer) {
     try {
