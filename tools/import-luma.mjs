@@ -47,6 +47,14 @@ const PATCHES = [
     'setInterval(() => { if (!tok || S.web || document.hidden || cfAway() || Date.now() < cfRateUntil) return;',
     1,
   ],
+  // 재생 상태 확인을 2.5초에서 5초로(멈춰 있으면 10초) 늘립니다.
+  ['pollRemote(); }, 2500);', 'pollRemote(); }, 5000);', 1],
+  // 시작할 때 Spotify가 막으면(429) 오류만 띄우지 않고, 막힌 시간이 지나면 저절로 다시 연결합니다.
+  [
+    "    toast('Spotify에 연결하지 못했어요: ' + e.message);",
+    "    if (e.status === 429) { const wait = Math.max(30000, cfRateUntil - Date.now()); toast('Spotify 요청이 많아 잠시 막혔어요. ' + Math.ceil(wait / 60000) + '분 안에 저절로 다시 연결할게요', 8000); setTimeout(() => location.reload(), wait); return; }\n    toast('Spotify에 연결하지 못했어요: ' + e.message);",
+    1,
+  ],
   // Spotify가 "요청이 너무 많다"(429)고 하면 알려 준 시간까지 주기적 확인을 쉽니다.
   [
     "  if (r.status === 429 && retry) { await sleep(",

@@ -8,7 +8,9 @@ const ITEM_PREFIX = 'item:';
 const RATE_PREFIX = 'rate:';
 const DISPATCH_KEY = 'dispatch';
 const DISPATCH_GAP_SECONDS = 60;
-const LIVE_CACHE_SECONDS = 25;
+const LIVE_CACHE_SECONDS = 40;
+// Spotify가 막거나 실패하면 이 시간 동안은 다시 묻지 않습니다(보는 사람마다 다시 묻지 않도록).
+const LIVE_FAILURE_SECONDS = 90;
 const LASTFM_PLACEHOLDER_IMAGE = '2a96cbd8b46e442fc41c2b86b821562f';
 const COLLECT_KEY = 'collect';
 const COLLECT_GAP_SECONDS = 360;
@@ -172,7 +174,11 @@ async function liveResponse(request, env, url, cors) {
   }
   const reading = target.startsWith('spotify:') ? fetchSpotifyLive(target.slice('spotify:'.length)) : fetchLive(target, env);
   const live = await reading.catch(() => null);
-  if (!live) return json({ error: 'upstream failed' }, 502, cors);
+  if (!live) {
+    const failed = json({ error: 'upstream failed' }, 502, { ...cors, 'Cache-Control': `max-age=${LIVE_FAILURE_SECONDS}` });
+    await cache?.put(url.href, failed.clone()).catch(() => {});
+    return failed;
+  }
   const response = json(live, 200, { ...cors, 'Cache-Control': `max-age=${LIVE_CACHE_SECONDS}` });
   await cache?.put(url.href, response.clone());
   return response;

@@ -5368,6 +5368,7 @@ async function startApp(){
   catch (e) {
     if (e.status === 403) return showBlocked();
     if (e.status === 401 || !tok) { logout(); return; }
+    if (e.status === 429) { const wait = Math.max(30000, cfRateUntil - Date.now()); toast('Spotify 요청이 많아 잠시 막혔어요. ' + Math.ceil(wait / 60000) + '분 안에 저절로 다시 연결할게요', 8000); setTimeout(() => location.reload(), wait); return; }
     toast('Spotify에 연결하지 못했어요: ' + e.message);
   }
   if (me) {
@@ -5385,7 +5386,7 @@ async function startApp(){
   pollRemote();
   // 다른 기기 상태 확인: 재생 중이면 2.5초마다, 멈춰 있으면 5초마다
   let pollN = 0;
-  setInterval(() => { if (!tok || S.web || document.hidden || cfAway() || Date.now() < cfRateUntil) return; if (S.paused && ++pollN % 2) return; pollRemote(); }, 2500);   // 앱이 뒤에 있을 때는 lumaTick이 맡아요
+  setInterval(() => { if (!tok || S.web || document.hidden || cfAway() || Date.now() < cfRateUntil) return; if (S.paused && ++pollN % 2) return; pollRemote(); }, 5000);   // 앱이 뒤에 있을 때는 lumaTick이 맡아요
   if (IS_APP) setInterval(widgetSync, 700);
   setTimeout(uploadMyLyrics, 8000);
   if (IS_APP) setTimeout(nativeSync, 1500);

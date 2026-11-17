@@ -13,7 +13,8 @@ import {
 const REFRESH_MS = 60_000;
 const MAX_WEEKS_BACK = 7;
 const SNAPSHOT_REFRESH_MS = 55_000;
-const LIVE_REFRESH_MS = 30_000;
+// 친구 실시간 확인 간격. 세 앱이 같은 Spotify 앱 한도를 나눠 쓰므로 넉넉히 둡니다.
+const LIVE_REFRESH_MS = 45_000;
 const LIVE_MAX_AGE_MS = 90_000;
 const COUNT_UP_MS = 900;
 const REFRESH_SPIN_MS = 500;
@@ -530,9 +531,18 @@ async function refreshNow(event) {
   await render();
 }
 
+// 수집이 멈췄거나, 마지막으로 확인한 지 20분이 넘은 곡은 '지금 듣는 중'으로 보여 주지 않습니다.
+const NOW_PLAYING_MAX_AGE_SECONDS = 20 * 60;
+
 function hideStaleNowPlaying(data) {
-  if (Date.now() / 1000 - state.snapshot.generatedAt < NOW_PLAYING_TTL_SECONDS) return data;
-  return { ...data, members: data.members.map((member) => ({ ...member, nowPlaying: null })) };
+  const now = Date.now() / 1000;
+  const stale = now - state.snapshot.generatedAt >= NOW_PLAYING_TTL_SECONDS;
+  return {
+    ...data,
+    members: data.members.map((member) =>
+      stale || (member.nowPlaying?.seen_at && now - member.nowPlaying.seen_at > NOW_PLAYING_MAX_AGE_SECONDS) ? { ...member, nowPlaying: null } : member,
+    ),
+  };
 }
 
 const playSeconds = (plays) => plays.reduce((sum, play) => sum + (play.durationSec ?? ESTIMATED_TRACK_SECONDS), 0);

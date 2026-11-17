@@ -1,6 +1,9 @@
 import { getMember, listMembers, nowPlayingMap, recentScrobble, scrobblesBetween } from './db.js';
 import { localParts, weekRange } from './time.js';
 
+// 이보다 오래전에 확인한 곡은 '지금 듣는 중'으로 보지 않습니다(수집 간격 15분 + 여유).
+export const NOW_PLAYING_MAX_AGE_SECONDS = 20 * 60;
+
 // 길이를 알 수 없는 곡은 일반적인 곡 길이로 계산하고, 화면에 추정 비율을 표시합니다.
 export const ESTIMATED_TRACK_SECONDS = 210;
 
@@ -117,7 +120,8 @@ export function buildOverview(db, { week, now, tzOffsetMinutes, groupId = null }
   const previousEnd = Math.min(previous.end, previous.start + (now - range.start));
   const previousRows = groupRows(previous.start, week === 0 ? previousEnd : previous.end);
   const tasteRows = groupRows(tasteStart, range.end);
-  const playing = nowPlayingMap(db);
+  // 수집이 실패해 갱신되지 못한 '지금 듣는 곡'이 계속 남지 않도록, 오래전에 본 곡은 버립니다.
+  const playing = new Map([...nowPlayingMap(db)].filter(([, row]) => now - row.seen_at <= NOW_PLAYING_MAX_AGE_SECONDS));
 
   const members = groupMembers.map((member) => {
     const own = rows.filter((r) => r.member_id === member.id);
