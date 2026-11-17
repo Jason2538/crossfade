@@ -12,8 +12,34 @@ if (!source) {
   process.exit(1);
 }
 
+// 친구 탭을 크로스페이드 기록으로 채우는 코드와 그 모양입니다.
+const BRIDGE = readFileSync(join(ROOT, 'tools', 'luma-crossfade.js'), 'utf8');
+const BRIDGE_STYLE = `
+/* ---------- 크로스페이드 친구 (tools/luma-crossfade.js) ---------- */
+.cfNote{color:var(--dim);font-size:13.5px;margin:4px 0 18px}
+.cfList{display:flex;flex-direction:column;gap:6px;margin-bottom:22px}
+.cfSong{display:flex;align-items:center;gap:12px;width:100%;padding:8px 10px;border-radius:12px;text-align:left;transition:background .25s}
+.cfSong:hover{background:rgba(255,255,255,.06)}.cfSong:active{scale:.99}
+.cfSong img,.cfSong .ph{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;background:var(--faint)}
+.cfSong .m,.cfFr .m{min-width:0;flex:1;display:flex;flex-direction:column}
+.cfSong b,.cfFr b{font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cfSong small,.cfFr small{color:var(--dim);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cfSong .go{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--spot);color:#000;font-size:11px}
+.cfRank{display:flex;flex-direction:column;gap:4px;margin-bottom:22px;padding:6px;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid var(--faint)}
+.cfFr{display:flex;align-items:center;gap:12px;padding:8px 10px}
+.cfFr .no{width:18px;text-align:center;color:var(--dim);font-weight:700}
+.cfAva{flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#0a84ff,#bf5af2 55%,#ff9f0a);color:#fff;font-weight:700}
+.cfAva.sm{width:28px;height:28px;font-size:12px}
+.cfMore{display:block;margin:6px auto 30px}
+`;
+
 // [바꿀 내용, 새 내용, 나와야 하는 횟수]
 const PATCHES = [
+  // 친구 탭과 홈의 "친구가 지금 듣는 중"은 Firebase 대신 크로스페이드 기록을 씁니다.
+  ['/* ---------- 화면 ---------- */\nfunction openFri(){\n', `${BRIDGE}\n/* ---------- 화면 ---------- */\nfunction openFri(){\n  if (CF.inside) { detail = null; showView('fri'); window.scrollTo({ top: 0 }); CF.html = ''; cfRenderFri(); return; }\n`, 1],
+  ['function renderFri(quiet){\n', 'function renderFri(quiet){\n  if (CF.inside) return cfRenderFri();\n', 1],
+  ['function renderLiveStrip(){\n', 'function renderLiveStrip(){\n  if (CF.inside) return cfRenderStrip();\n', 1],
+  ['</style>', `${BRIDGE_STYLE}</style>`, 1],
   // 친구들이 이미 크로스페이드 앱 사용자로 등록되어 있으므로 같은 Spotify 앱을 씁니다.
   [/CLIENT_ID: '[0-9a-f]{32}'/g, `CLIENT_ID: '${clientId}'`, 1],
   // 같은 주소(jason2538.github.io)의 원래 Luma와 저장 값이 섞이지 않게 이름을 바꿉니다.

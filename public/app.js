@@ -29,7 +29,8 @@ const PENDING_STORAGE_KEY = 'crossfade.pendingGroup';
 const WAITING_REFRESH_MS = 15_000;
 const CODE_LETTERS = 'abcdefghjkmnpqrstuvwxyz23456789';
 const QUEUED_MESSAGE = '요청을 보냈어요. 다음 수집 때(15분쯤) 반영돼요.';
-const SERVICE_NAMES = { spotify: 'Spotify', apple: 'Apple Music' };
+// Apple Music(Last.fm) 연결은 없앴습니다. 예전에 그렇게 들어온 멤버는 관리자 화면에서만 표시합니다.
+const SERVICE_NAMES = { spotify: 'Spotify', apple: 'Last.fm(예전 연결)' };
 const DAY_NAMES = ['월', '화', '수', '목', '금', '토', '일'];
 
 const app = document.getElementById('app');
@@ -39,7 +40,7 @@ const SPOTIFY_MESSAGES = {
   connected: 'Spotify 계정을 연결했어요. 최근 재생 기록을 가져오는 중이에요.',
   denied: 'Spotify 로그인이 취소됐어요.',
   notAllowed: '이 Spotify 계정은 아직 앱 사용자로 등록되어 있지 않아요. 그룹 관리자에게 Spotify 이메일을 알려 주세요.',
-  full: 'Spotify 로그인은 5명까지만 쓸 수 있어요. Last.fm으로 연결해 주세요.',
+  full: 'Spotify 로그인은 5명까지만 쓸 수 있어요. 관리자에게 알려 주세요.',
   failed: 'Spotify 로그인에 실패했어요. 잠시 후 다시 시도해 주세요.',
   queued: 'Spotify 계정을 연결했어요. 다음 수집 때(15분쯤) 그룹에 나타나요.',
 };
@@ -573,12 +574,70 @@ function timeAgo(seconds) {
 
 function cover(item, small = false) {
   const initial = (item.artist ?? '?').trim().charAt(0).toUpperCase();
+  const image = item.image ? el('img', { src: item.image, alt: '', loading: 'lazy' }) : initial;
+  const size = small ? 'cover small' : 'cover';
+  if (!item.track || !state.session?.static) return el('span', { class: size, 'aria-hidden': 'true' }, image);
+  // 곡 표지를 누르면 내 Spotify 계정으로 Luma에서 재생합니다. 카드 링크 안에 있어도 링크로 넘어가지 않게 막습니다.
+  const play = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    playInLuma(item);
+  };
   return el(
     'span',
-    { class: small ? 'cover small' : 'cover', 'aria-hidden': 'true' },
-    item.image ? el('img', { src: item.image, alt: '', loading: 'lazy' }) : initial,
+    {
+      class: `${size} playable`,
+      role: 'button',
+      tabindex: '0',
+      title: '내 Spotify로 재생',
+      'aria-label': `${item.track} - ${item.artist} 재생`,
+      onclick: play,
+      onkeydown: (event) => {
+        if (event.key === 'Enter' || event.key === ' ') play(event);
+      },
+    },
+    image,
+    el('span', { class: 'play-badge', 'aria-hidden': 'true' }, '▶'),
   );
 }
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Luma 탭을 열고, Luma가 준비되면 곡을 찾아 틉니다.
+async function playInLuma(item) {
+  if (location.hash !== '#/luma') location.hash = '#/luma';
+  showLuma(true);
+  const frame = lumaView.querySelector('iframe');
+  for (let tries = 0; tries < 100; tries += 1) {
+    const play = frame.contentWindow?.cfLumaPlay;
+    if (play) return play(item.artist, item.track);
+    await sleep(200);
+  }
+}
+
+// Luma의 친구 탭이 읽는 값입니다. 크로스페이드 홈과 같은 실시간 기록을 넘깁니다.
+window.crossfadeFriends = () => {
+  if (!state.snapshot) return null;
+  const overview = withLive(hideStaleNowPlaying(state.snapshot.overview[0]), 0);
+  const social = liveSocial();
+  const song = (item) => item && { track: item.track, artist: item.artist, image: item.image ?? '', playedAt: item.played_at ?? item.playedAt ?? null };
+  return JSON.parse(
+    JSON.stringify({
+      generatedAt: state.snapshot.generatedAt,
+      members: overview.members.map((member) => ({
+        id: member.id,
+        name: member.name,
+        nowPlaying: song(member.nowPlaying),
+        lastPlayed: song(member.lastPlayed),
+        weekMinutes: member.minutes,
+        todayMinutes: social?.members[member.id]?.today.minutes ?? 0,
+        streak: social?.members[member.id]?.streak ?? 0,
+      })),
+      activity: (social?.activity ?? []).slice(0, 40).map((item) => ({ memberId: item.memberId, ...song(item) })),
+      topTracks: (social?.groupTop.tracks ?? []).slice(0, 10).map((item) => ({ ...song(item), plays: item.plays })),
+    }),
+  );
+};
 
 const equalizer = () => el('span', { class: 'eq', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'));
 
@@ -692,32 +751,6 @@ function weekNav(week, onChange) {
   );
 }
 
-function fader(members) {
-  const sum = (service) => members.filter((m) => m.service === service).reduce((total, m) => total + m.minutes, 0);
-  const spotify = sum('spotify');
-  const apple = sum('apple');
-  const total = spotify + apple;
-  if (!total) return null;
-  const share = Math.round((spotify / total) * 100);
-  return el(
-    'section',
-    { class: 'fader', 'aria-label': `서비스별 청취 비중: Spotify ${share}%, Apple Music ${100 - share}%` },
-    el(
-      'div',
-      { class: 'fader-rail', 'aria-hidden': 'true' },
-      el('i', { class: 'spotify', style: { width: `${share}%` } }),
-      el('i', { class: 'apple', style: { width: `${100 - share}%` } }),
-      el('span', { class: 'fader-knob', style: { left: `${share}%` } }),
-    ),
-    el(
-      'div',
-      { class: 'fader-labels' },
-      el('span', {}, el('b', {}, `Spotify ${share}%`), ` · ${number(spotify)}분`),
-      el('span', {}, el('b', {}, `Apple Music ${100 - share}%`), ` · ${number(apple)}분`),
-    ),
-  );
-}
-
 function nowPlayingSection(members) {
   const sorted = [...members].sort((a, b) => Number(Boolean(b.nowPlaying)) - Number(Boolean(a.nowPlaying)));
   return el(
@@ -809,12 +842,6 @@ function rankingSection(data, social) {
       'div',
       { class: 'section-head' },
       el('h2', {}, live ? `${PERIOD_NAMES[period]} 순위` : `${weekName(week.offset)} 랭킹`),
-      el(
-        'span',
-        { class: 'legend' },
-        el('span', {}, el('i', { class: 'swatch spotify' }), 'Spotify'),
-        el('span', {}, el('i', { class: 'swatch apple' }), 'Apple Music'),
-      ),
     ),
     el(
       'div',
@@ -841,7 +868,6 @@ function rankingSection(data, social) {
               'span',
               { class: 'rank-name' },
               el('b', {}, member.name, live ? streakBadge(streak) : null),
-              el('span', { class: 'service' }, SERVICE_NAMES[member.service]),
             ),
             el(
               'span',
@@ -853,7 +879,7 @@ function rankingSection(data, social) {
                 'div',
                 { class: 'bar-track', 'aria-hidden': 'true' },
                 el('div', {
-                  class: `bar-fill ${member.service}`,
+                  class: 'bar-fill spotify',
                   style: { width: `${(stat[metric] / max) * 100}%`, animationDelay: `${300 + index * 70}ms` },
                 }),
               ),
@@ -920,14 +946,27 @@ const ACTIVITY_PREVIEW = 8;
 
 const searchText = (item) => encodeURIComponent(`${item.track} ${item.artist}`);
 
-// Luma처럼 바로 같이 들을 수는 없어서, 각자 쓰는 앱에서 같은 곡을 찾아 줍니다.
+// ▶ 는 내 Spotify 계정으로 Luma에서 바로 틀고, Spotify 는 Spotify 앱·웹에서 같은 곡을 찾습니다.
 function listenLinks(item) {
-  const link = (href, label) => el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, label);
   return el(
     'span',
     { class: 'listen-links' },
-    link(`https://open.spotify.com/search/${searchText(item)}`, 'Spotify'),
-    link(`https://music.apple.com/kr/search?term=${searchText(item)}`, 'Apple Music'),
+    state.session?.static
+      ? el(
+          'button',
+          {
+            class: 'link-button play-link',
+            type: 'button',
+            onclick: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              playInLuma(item);
+            },
+          },
+          '▶ 재생',
+        )
+      : null,
+    el('a', { href: `https://open.spotify.com/search/${searchText(item)}`, target: '_blank', rel: 'noopener noreferrer' }, 'Spotify'),
   );
 }
 
@@ -1183,7 +1222,6 @@ function tasteSection(data) {
                   'div',
                   { class: 'pair-names' },
                   `${a.name} · ${b.name}`,
-                  el('span', { class: 'pair-tag' }, `${SERVICE_NAMES[a.service]} × ${SERVICE_NAMES[b.service]}`),
                 ),
                 el('div', { class: 'pair-score' }, String(pair.score), el('small', {}, '%')),
               ),
@@ -1260,7 +1298,6 @@ async function renderHome() {
           el('div', { class: 'fact' }, counted(members.length), el('span', {}, '친구')),
         ),
       ),
-      fader(members),
       members.length
         ? [
             friendsSummary(data, social),
@@ -1380,7 +1417,7 @@ async function renderMember(id) {
       el(
         'div',
         { class: 'detail-head' },
-        el('div', {}, el('h1', {}, data.name), el('span', { class: 'service' }, SERVICE_NAMES[data.service])),
+        el('div', {}, el('h1', {}, data.name)),
         weekNav(data.week, changeWeek),
       ),
       el(
@@ -1876,129 +1913,51 @@ function renderGate() {
   input.focus();
 }
 
-const SETUP_STEPS = {
-  spotify: [
-    'last.fm에 무료로 가입합니다.',
-    'Last.fm 설정의 애플리케이션 메뉴에서 Spotify를 연결합니다.',
-    'Last.fm 사용자 이름을 아래에 입력합니다.',
-  ],
-  apple: [
-    'last.fm에 무료로 가입합니다.',
-    '아이폰은 FastScrobbler, 안드로이드는 Pano Scrobbler를 설치하고 Last.fm 계정을 연결합니다.',
-    'Last.fm 사용자 이름을 아래에 입력합니다.',
-  ],
-};
-
-const JOIN_STEP = '이름과 Last.fm 사용자 이름, 쓰는 서비스를 그룹 관리자에게 보내 주세요.';
-
 function openAddDialog() {
   const isStatic = state.session.static;
-  const readOnly = isStatic && !state.connect;
+  const canLogin = isStatic ? Boolean(state.connect?.spotifyClientId) : state.session.spotifyLogin;
   const error = el('p', { class: 'form-error', role: 'alert' });
-  const steps = el('ol', { class: 'steps' });
-  const canSpotifyLogin = isStatic ? Boolean(state.connect?.spotifyClientId) : state.session.spotifyLogin;
-  const spotifyLogin = el(
-    'div',
-    { class: 'spotify-login' },
-    isStatic
-      ? el(
-          'button',
-          {
-            class: 'btn primary',
-            type: 'button',
-            onclick: async (event) => {
-              const button = event.currentTarget;
-              button.disabled = true;
-              button.textContent = 'Spotify로 이동하는 중...';
-              try {
-                await startSpotifyLogin(state.connect);
-              } catch {
-                button.disabled = false;
-                button.textContent = 'Spotify로 로그인';
-                error.textContent = 'Spotify 로그인을 시작하지 못했어요. 다시 시도해 주세요.';
-              }
-            },
+  const login = isStatic
+    ? el(
+        'button',
+        {
+          class: 'btn primary',
+          type: 'button',
+          disabled: !canLogin,
+          onclick: async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            button.textContent = 'Spotify로 이동하는 중...';
+            try {
+              await startSpotifyLogin(state.connect);
+            } catch {
+              button.disabled = false;
+              button.textContent = 'Spotify로 로그인';
+              error.textContent = 'Spotify 로그인을 시작하지 못했어요. 다시 시도해 주세요.';
+            }
           },
-          'Spotify로 로그인',
-        )
-      : el('a', { class: 'btn primary', href: '/api/spotify/login' }, 'Spotify로 로그인'),
-    el('p', {}, '최대 5명까지 가능하고, 관리자가 Spotify 앱에 이메일을 등록한 계정만 로그인할 수 있어요. 아래처럼 Last.fm으로 연결해도 됩니다.'),
-  );
-  const showSteps = (service) => {
-    const texts = readOnly ? [...SETUP_STEPS[service].slice(0, -1), JOIN_STEP] : SETUP_STEPS[service];
-    steps.replaceChildren(...texts.map((text) => el('li', {}, text)));
-    spotifyLogin.hidden = service !== 'spotify' || !canSpotifyLogin;
-  };
-  showSteps('spotify');
-
-  const radio = (value, checked) =>
-    el(
-      'label',
-      {},
-      el('input', { type: 'radio', name: 'service', value, checked, onchange: () => showSteps(value) }),
-      SERVICE_NAMES[value],
-    );
-
-  const submit = el('button', { class: 'btn primary', type: 'submit', disabled: state.session.demo }, '추가하기');
-  const form = el(
-    'form',
-    {
-      onsubmit: async (event) => {
-        event.preventDefault();
-        if (readOnly) return;
-        const fields = new FormData(form);
-        const member = {
-          name: fields.get('name').trim(),
-          lastfmUser: fields.get('lastfmUser').trim(),
-          service: fields.get('service'),
-        };
-        submit.disabled = true;
-        error.textContent = '';
-        try {
-          if (isStatic) {
-            await sendToCollector(state.connect, { kind: 'member', code: state.snapshotCode, ...member });
-            state.flash = QUEUED_MESSAGE;
-          } else {
-            await api('/api/members', { method: 'POST', body: JSON.stringify(member) });
-          }
-          dialog.close();
-          render();
-        } catch (failure) {
-          error.textContent = failure.message;
-          submit.disabled = false;
-        }
-      },
-    },
+        },
+        'Spotify로 로그인',
+      )
+    : el('a', { class: 'btn primary', href: '/api/spotify/login' }, 'Spotify로 로그인');
+  const dialog = el(
+    'dialog',
+    { onclose: () => dialog.remove() },
     el('h2', {}, '친구 추가'),
-    el(
-      'fieldset',
-      { class: 'field' },
-      el('legend', {}, '쓰는 음악 서비스'),
-      el('div', { class: 'service-choice' }, radio('spotify', true), radio('apple', false)),
-    ),
-    spotifyLogin,
-    steps,
-    readOnly
-      ? null
-      : [
-          el('label', { class: 'field' }, el('span', {}, '이름'), el('input', { type: 'text', name: 'name', maxlength: '20', required: true })),
-          el(
-            'label',
-            { class: 'field' },
-            el('span', {}, 'Last.fm 사용자 이름'),
-            el('input', { type: 'text', name: 'lastfmUser', maxlength: '15', required: true, autocapitalize: 'off', spellcheck: 'false' }),
-          ),
-          state.session.demo ? el('p', { class: 'form-error' }, '데모 모드에서는 친구를 추가할 수 없어요.') : error,
-        ],
+    el('p', { class: 'dialog-note' }, '이 그룹에 들어올 친구가 이 기기에서 Spotify로 로그인하면 바로 추가돼요. 다음 수집 때(1~2분) 기록이 보여요.'),
+    el('ol', { class: 'steps' }, [
+      el('li', {}, '관리자가 Spotify 개발자 대시보드의 User Management에 친구의 Spotify 이메일을 등록해요.'),
+      el('li', {}, '친구가 초대 링크로 들어와 아래 버튼으로 로그인해요.'),
+    ]),
+    canLogin ? null : el('p', { class: 'form-error' }, 'Spotify 로그인이 아직 설정되지 않았어요.'),
+    error,
     el(
       'div',
       { class: 'form-actions' },
       el('button', { class: 'btn', type: 'button', onclick: () => dialog.close() }, '닫기'),
-      readOnly ? null : submit,
+      login,
     ),
   );
-
-  const dialog = el('dialog', { onclose: () => dialog.remove() }, form);
   document.body.append(dialog);
   dialog.showModal();
 }
@@ -2142,7 +2101,16 @@ async function render() {
   }
   const onLuma = location.hash === '#/luma';
   showLuma(onLuma);
-  if (onLuma) return;
+  if (onLuma) {
+    try {
+      if (!state.session) state.session = await loadSession();
+      await refreshSnapshot();
+    } catch {
+      // 기록을 못 받아도 Luma는 그대로 씁니다.
+    }
+    state.refreshTimer = setTimeout(render, REFRESH_MS);
+    return;
+  }
   try {
     if (!state.session) state.session = await loadSession();
     if (state.session.static && location.hash === '#/admin') return renderAdmin();

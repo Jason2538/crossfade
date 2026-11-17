@@ -1,7 +1,7 @@
 {
   "name": "크로스페이드",
   "short_name": "크로스페이드",
-  "description": "스포티파이와 애플뮤직 친구들의 주간 청취 통계",
+  "description": "Spotify 친구들의 청취 통계와 Luma 재생기",
   "lang": "ko",
   "start_url": "./",
   "scope": "./",

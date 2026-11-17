@@ -113,7 +113,7 @@ const HANDLERS = {
       });
     } catch (error) {
       if (!(error instanceof SpotifyGroupFull)) throw error;
-      addNotice(db, group.id, 'Spotify 로그인은 5명까지만 쓸 수 있어요. Last.fm으로 연결해 주세요.', now);
+      addNotice(db, group.id, 'Spotify 로그인은 5명까지만 쓸 수 있어요. 관리자에게 알려 주세요.', now);
     }
   },
 };

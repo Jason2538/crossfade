@@ -1784,3 +1784,43 @@ html.luma-open body {
     font-size: 13px;
   }
 }
+
+/* 곡 표지를 누르면 Luma에서 재생 */
+.cover.playable {
+  position: relative;
+  cursor: pointer;
+}
+
+.cover .play-badge {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.38);
+  color: #fff;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.cover.playable:hover .play-badge,
+.cover.playable:focus-visible .play-badge {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cover.playable .play-badge {
+    inset: auto 2px 2px auto;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 8px;
+    opacity: 0.9;
+  }
+}
+
+.play-link {
+  color: var(--accent);
+  font-weight: 600;
+}
