@@ -84,3 +84,40 @@ export function windowAround(tracks, index, size = 100) {
   const slice = tracks.slice(start, start + size);
   return { uris: slice.map((track) => track.uri), position: index - start };
 }
+
+// 글자 중 한글이 절반이 넘으면 번역하지 않습니다.
+export function isMostlyKorean(text) {
+  const letters = String(text).match(/[\p{L}]/gu) ?? [];
+  if (!letters.length) return true;
+  const hangul = letters.filter((char) => /[가-힣ㄱ-ㆎ]/.test(char)).length;
+  return hangul / letters.length > 0.5;
+}
+
+// 주소 길이 제한을 넘지 않게 가사 줄을 묶습니다. 각 묶음은 [시작 번호, 줄들] 입니다.
+export function chunkLines(lines, maxChars = 1200) {
+  const chunks = [];
+  let current = [];
+  let size = 0;
+  let start = 0;
+  lines.forEach((line, index) => {
+    if (current.length && size + line.length + 1 > maxChars) {
+      chunks.push([start, current]);
+      current = [];
+      size = 0;
+      start = index;
+    }
+    current.push(line);
+    size += line.length + 1;
+  });
+  if (current.length) chunks.push([start, current]);
+  return chunks;
+}
+
+// 번역 응답([[["번역\n", "원문\n", ...], ...]])을 줄 목록으로 되돌립니다. 줄 수가 맞지 않으면 null.
+export function parseTranslation(data, expected) {
+  if (!Array.isArray(data?.[0])) return null;
+  const text = data[0].map((part) => (Array.isArray(part) ? (part[0] ?? '') : '')).join('');
+  const lines = text.split('\n').map((line) => line.trim());
+  if (lines.length === expected + 1 && lines[expected] === '') lines.pop();
+  return lines.length === expected ? lines : null;
+}

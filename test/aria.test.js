@@ -52,3 +52,18 @@ test('누른 곡을 기준으로 Spotify에 넘길 100곡을 자른다', () => {
   const short = windowAround(tracks.slice(0, 5), 2);
   assert.deepEqual([short.uris.length, short.position], [5, 2]);
 });
+
+test('한국어 가사는 번역하지 않고, 긴 가사는 묶어서 번역한 뒤 줄별로 되돌린다', async () => {
+  const { isMostlyKorean, chunkLines, parseTranslation } = await import('../public/aria/lib.js');
+  assert.equal(isMostlyKorean('너의 이름을 불러 baby'), true);
+  assert.equal(isMostlyKorean('Shining through the city'), false);
+  assert.equal(isMostlyKorean('♪ ...'), true, '글자가 없으면 번역할 것이 없다');
+
+  const chunks = chunkLines(['a'.repeat(500), 'b'.repeat(500), 'c'.repeat(500)], 1200);
+  assert.deepEqual(chunks.map(([start, lines]) => [start, lines.length]), [[0, 2], [2, 1]]);
+
+  const data = [[['빛나는 도시\n', 'Shining city\n'], ['다이너마이트', 'dynamite']]];
+  assert.deepEqual(parseTranslation(data, 2), ['빛나는 도시', '다이너마이트']);
+  assert.equal(parseTranslation(data, 3), null, '줄 수가 다르면 쓰지 않는다');
+  assert.equal(parseTranslation({}, 1), null);
+});

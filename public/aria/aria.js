@@ -1,5 +1,18 @@
 // Aria: Spotify 음악을 Apple 앱 같은 화면으로 듣는 플레이어입니다. 크로스페이드 안의 탭으로 열립니다.
-import { activeLine, artistNames, cleanTitle, formatTime, normTrack, parseLRC, pickImage, uniqueTracks, windowAround } from './lib.js';
+import {
+  activeLine,
+  artistNames,
+  chunkLines,
+  cleanTitle,
+  formatTime,
+  isMostlyKorean,
+  normTrack,
+  parseLRC,
+  parseTranslation,
+  pickImage,
+  uniqueTracks,
+  windowAround,
+} from './lib.js';
 
 const FALLBACK_CLIENT_ID = '06b050ce121e47328a9c49319c0bc604';
 const AUTH_URL = 'https://accounts.spotify.com/authorize';
@@ -53,6 +66,7 @@ const ICONS = {
   listen: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM10 8.6v6.8c0 .5.5.7.9.5l5.3-3.4c.4-.2.4-.8 0-1L10.9 8.1c-.4-.2-.9 0-.9.5z', 'stroke'],
   library: ['M5 4v16M9.5 4v16M14 5l4.5 14.5', 'stroke'],
   search: ['M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM15.3 15.3 20 20', 'stroke'],
+  translate: ['M4 5.5h9M8.5 3.5v2M6 5.5c.5 3.5 2.5 6 5.5 7.5M11 5.5c-.8 3.5-3 6-6.5 7.5M13 20.5l3.8-9 3.7 9M14.3 17.5h5', 'stroke'],
   lyrics: ['M5 5.5h14c.8 0 1.5.7 1.5 1.5v8c0 .8-.7 1.5-1.5 1.5H11l-4.5 3.5V16.5H5c-.8 0-1.5-.7-1.5-1.5V7c0-.8.7-1.5 1.5-1.5zM8 9.5h8M8 12.5h5', 'stroke'],
   devices: ['M7 3.5h10c.8 0 1.5.7 1.5 1.5v14c0 .8-.7 1.5-1.5 1.5H7c-.8 0-1.5-.7-1.5-1.5V5c0-.8.7-1.5 1.5-1.5zM12 10.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM12 6.5h.01', 'stroke'],
   queue: ['M4 6.5h11M4 11.5h11M4 16.5h7M17.5 14v6M15 17h5', 'stroke'],
@@ -1507,7 +1521,9 @@ async function loadLyrics(force = false) {
     np.lyricsBox.replaceChildren(el('div', { class: 'np-nolyrics' }, '이 곡의 가사를 찾지 못했어요'));
     return;
   }
+  const foreign = !isMostlyKorean(lyrics.lines.map((line) => line.text).join(' '));
   np.lyricsBox.replaceChildren(
+    foreign ? translateButton() : null,
     el(
       'div',
       { class: `lines ${lyrics.synced ? 'synced' : 'plain'}` },
@@ -1520,12 +1536,82 @@ async function loadLyrics(force = false) {
               if (line.time !== null) seek(line.time);
             },
           },
-          line.text || '♪',
+          el('span', { class: 'orig' }, line.text || '♪'),
         ),
       ),
     ),
     lyrics.synced ? null : el('p', { class: 'np-lyrics-note' }, '시간이 맞춰지지 않은 가사예요'),
   );
+  if (foreign && np.translate) showTranslation(track);
+}
+
+/* ---------- 가사 번역 ---------- */
+// 외국어 가사는 줄마다 아래에 한국어 번역을 붙입니다. 켜고 끈 것은 기억합니다.
+const TRANSLATE_KEY = 'aria_translate';
+np.translate = storage.get(TRANSLATE_KEY) !== '0';
+const translations = new Map();
+
+function translateButton() {
+  const button = el(
+    'button',
+    { class: `np-translate ${np.translate ? 'on' : ''}`, type: 'button', 'aria-pressed': String(np.translate) },
+    icon('translate'),
+    el('span', {}, '번역'),
+  );
+  button.addEventListener('click', () => {
+    np.translate = !np.translate;
+    storage.set(TRANSLATE_KEY, np.translate ? '1' : '0');
+    button.classList.toggle('on', np.translate);
+    button.setAttribute('aria-pressed', String(np.translate));
+    if (np.translate && S.track) showTranslation(S.track);
+    else for (const node of np.lyricsBox.querySelectorAll('.tr')) node.remove();
+    np.activeLine = -2;
+  });
+  return button;
+}
+
+// Google 번역의 공개 주소를 씁니다(키 없음). 가사 글자만 보냅니다.
+async function translateLines(lines) {
+  const result = Array(lines.length).fill('');
+  for (const [start, chunk] of chunkLines(lines)) {
+    const params = new URLSearchParams({ client: 'gtx', sl: 'auto', tl: 'ko', dt: 't', q: chunk.join('\n') });
+    const response = await fetch(`https://translate.googleapis.com/translate_a/single?${params}`);
+    if (!response.ok) throw new Error(`번역 오류 ${response.status}`);
+    let translated = parseTranslation(await response.json(), chunk.length);
+    // 줄 수가 어긋나면 그 묶음만 한 줄씩 다시 번역합니다.
+    if (!translated) {
+      translated = [];
+      for (const line of chunk) {
+        const one = new URLSearchParams({ client: 'gtx', sl: 'auto', tl: 'ko', dt: 't', q: line });
+        const data = await (await fetch(`https://translate.googleapis.com/translate_a/single?${one}`)).json();
+        translated.push(parseTranslation(data, 1)?.[0] ?? '');
+      }
+    }
+    translated.forEach((line, i) => (result[start + i] = line));
+  }
+  return result;
+}
+
+async function showTranslation(track) {
+  const box = np.lyricsBox;
+  box.classList.add('translating');
+  try {
+    if (!translations.has(track.uri)) translations.set(track.uri, await translateLines(np.lyrics.lines.map((line) => line.text)));
+    if (np.lyricsFor !== track.uri || !np.translate) return;
+    const lines = translations.get(track.uri);
+    box.querySelectorAll('.line').forEach((node, i) => {
+      node.querySelector('.tr')?.remove();
+      const text = lines[i];
+      // 원문과 같거나 비어 있으면(의성어 등) 붙이지 않습니다.
+      if (text && text !== np.lyrics.lines[i].text) node.append(el('span', { class: 'tr' }, text));
+    });
+    np.activeLine = -2;
+  } catch {
+    translations.delete(track.uri);
+    toast('가사를 번역하지 못했어요. 잠시 후 다시 시도해 주세요');
+  } finally {
+    box.classList.remove('translating');
+  }
 }
 
 function syncLyrics(now) {
@@ -1536,6 +1622,7 @@ function syncLyrics(now) {
   lines.forEach((line, i) => {
     line.classList.toggle('active', i === index);
     line.classList.toggle('past', i < index);
+    line.classList.toggle('next', i === index + 1);
   });
   const target = lines[Math.max(0, index)];
   if (target) np.lyricsBox.scrollTo({ top: target.offsetTop - np.lyricsBox.clientHeight * 0.3, behavior: 'smooth' });
