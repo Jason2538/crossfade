@@ -121,3 +121,17 @@ export function parseTranslation(data, expected) {
   if (lines.length === expected + 1 && lines[expected] === '') lines.pop();
   return lines.length === expected ? lines : null;
 }
+
+// 번역할 줄: 글자가 있고 한국어가 대부분이 아닌 줄입니다(한국 노래 속 영어 줄도 번역합니다).
+export function foreignLines(lines) {
+  return lines.map((text, index) => (/\p{L}/u.test(text ?? '') && !isMostlyKorean(text) ? index : -1)).filter((index) => index >= 0);
+}
+
+// 대체 번역(MyMemory)은 원문 언어를 알려 줘야 해서 글자로 대강 짐작합니다.
+export function guessLanguage(text) {
+  if (/[\u3040-\u30FF]/.test(text)) return 'ja';
+  if (/[\u4E00-\u9FFF]/.test(text)) return 'zh-CN';
+  if (/[\u0400-\u04FF]/.test(text)) return 'ru';
+  if (/[ñ¿¡]/i.test(text)) return 'es';
+  return 'en';
+}

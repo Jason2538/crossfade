@@ -202,10 +202,14 @@ function rememberPending(code) {
 }
 
 // GitHub Pages에는 site.json 이 있고, 로컬 서버에는 없습니다.
+let siteBuild = null;
+
 async function fetchSiteConfig() {
   try {
     const response = await fetch(`site.json?t=${Date.now()}`, { cache: 'no-store' });
-    return response.ok ? await response.json() : null;
+    const site = response.ok ? await response.json() : null;
+    siteBuild = site?.build ?? null;
+    return site;
   } catch {
     return null;
   }
@@ -821,7 +825,10 @@ function watchFullscreen(name, frame) {
 function playerView(name) {
   if (!playerViews[name]) {
     const player = PLAYERS[name];
-    const search = playerCallback?.name === name ? playerCallback.search : '';
+    // 버전(v)을 붙여 기기에 남은 예전 플레이어 파일을 쓰지 않게 합니다. 로그인 결과(code, state)도 함께 넘깁니다.
+    const params = new URLSearchParams(playerCallback?.name === name ? playerCallback.search : '');
+    params.set('v', siteBuild ?? String(Math.floor(Date.now() / 60000)));
+    const search = `?${params}`;
     const frame = el('iframe', {
       class: 'luma-frame',
       title: player.title,

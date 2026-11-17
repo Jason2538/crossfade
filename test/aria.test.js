@@ -67,3 +67,12 @@ test('한국어 가사는 번역하지 않고, 긴 가사는 묶어서 번역한
   assert.equal(parseTranslation(data, 3), null, '줄 수가 다르면 쓰지 않는다');
   assert.equal(parseTranslation({}, 1), null);
 });
+
+test('한국 노래 속 영어 줄도 번역 대상이 되고, 대체 번역용 언어를 짐작한다', async () => {
+  const { foreignLines, guessLanguage } = await import('../public/aria/lib.js');
+  // 영어 글자가 더 많은 섞인 줄도 번역합니다.
+  assert.deepEqual(foreignLines(['너를 사랑해', 'I love you baby', '', '♪', '오늘 밤 tonight', '君が好き', '너를 정말 사랑해 baby']), [1, 4, 5]);
+  assert.equal(guessLanguage('君が好き'), 'ja');
+  assert.equal(guessLanguage('我爱你'), 'zh-CN');
+  assert.equal(guessLanguage('I love you'), 'en');
+});

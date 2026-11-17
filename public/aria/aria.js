@@ -1,18 +1,20 @@
 // Aria: Spotify 음악을 Apple 앱 같은 화면으로 듣는 플레이어입니다. 크로스페이드 안의 탭으로 열립니다.
-import {
+// lib.js 도 이 파일과 같은 버전으로 불러와서, 예전 파일이 섞이지 않게 합니다.
+const {
   activeLine,
   artistNames,
   chunkLines,
   cleanTitle,
+  foreignLines,
   formatTime,
-  isMostlyKorean,
+  guessLanguage,
   normTrack,
   parseLRC,
   parseTranslation,
   pickImage,
   uniqueTracks,
   windowAround,
-} from './lib.js';
+} = await import(`./lib.js${new URL(import.meta.url).search}`);
 
 const FALLBACK_CLIENT_ID = '06b050ce121e47328a9c49319c0bc604';
 const AUTH_URL = 'https://accounts.spotify.com/authorize';
@@ -1261,6 +1263,13 @@ function buildNowPlaying() {
     devices: el('button', { class: 'np-tool', type: 'button', 'aria-label': '재생 기기', onclick: () => showPanel('devices') }, icon('devices')),
     queue: el('button', { class: 'np-tool', type: 'button', 'aria-label': '다음 곡', onclick: () => showPanel('queue') }, icon('queue')),
   };
+  // 번역 버튼은 가사가 외국어일 때만 아래 도구 줄에 나타납니다.
+  np.translateButton = el(
+    'button',
+    { class: 'np-tool np-translate', type: 'button', 'aria-label': '가사 번역', hidden: true, onclick: toggleTranslation },
+    icon('translate'),
+    el('span', {}, '번역'),
+  );
 
   sheet.append(
     np.bgA,
@@ -1287,7 +1296,13 @@ function buildNowPlaying() {
           np.repeat,
         ),
         el('div', { class: 'np-volume' }, icon('volLow'), np.volume, icon('volHigh')),
-        el('div', { class: 'np-toolbar' }, np.tools.lyrics, el('div', { class: 'np-tool-mid' }, np.tools.devices, np.device), np.tools.queue),
+        el(
+          'div',
+          { class: 'np-toolbar' },
+          el('div', { class: 'np-tool-group' }, np.tools.lyrics, np.translateButton),
+          el('div', { class: 'np-tool-mid' }, np.tools.devices, np.device),
+          np.tools.queue,
+        ),
       ),
     ),
   );
@@ -1521,9 +1536,9 @@ async function loadLyrics(force = false) {
     np.lyricsBox.replaceChildren(el('div', { class: 'np-nolyrics' }, '이 곡의 가사를 찾지 못했어요'));
     return;
   }
-  const foreign = !isMostlyKorean(lyrics.lines.map((line) => line.text).join(' '));
+  np.foreign = foreignLines(lyrics.lines.map((line) => line.text));
+  updateTranslateButton();
   np.lyricsBox.replaceChildren(
-    foreign ? translateButton() : null,
     el(
       'div',
       { class: `lines ${lyrics.synced ? 'synced' : 'plain'}` },
@@ -1542,7 +1557,7 @@ async function loadLyrics(force = false) {
     ),
     lyrics.synced ? null : el('p', { class: 'np-lyrics-note' }, '시간이 맞춰지지 않은 가사예요'),
   );
-  if (foreign && np.translate) showTranslation(track);
+  if (np.foreign.length && np.translate) showTranslation(track);
 }
 
 /* ---------- 가사 번역 ---------- */
@@ -1551,52 +1566,76 @@ const TRANSLATE_KEY = 'aria_translate';
 np.translate = storage.get(TRANSLATE_KEY) !== '0';
 const translations = new Map();
 
-function translateButton() {
-  const button = el(
-    'button',
-    { class: `np-translate ${np.translate ? 'on' : ''}`, type: 'button', 'aria-pressed': String(np.translate) },
-    icon('translate'),
-    el('span', {}, '번역'),
-  );
-  button.addEventListener('click', () => {
-    np.translate = !np.translate;
-    storage.set(TRANSLATE_KEY, np.translate ? '1' : '0');
-    button.classList.toggle('on', np.translate);
-    button.setAttribute('aria-pressed', String(np.translate));
-    if (np.translate && S.track) showTranslation(S.track);
-    else for (const node of np.lyricsBox.querySelectorAll('.tr')) node.remove();
-    np.activeLine = -2;
-  });
-  return button;
+function updateTranslateButton() {
+  const show = Boolean(np.foreign?.length);
+  np.translateButton.hidden = !show;
+  np.translateButton.classList.toggle('on', show && np.translate);
+  np.translateButton.setAttribute('aria-pressed', String(show && np.translate));
 }
 
-// Google 번역의 공개 주소를 씁니다(키 없음). 가사 글자만 보냅니다.
-async function translateLines(lines) {
-  const result = Array(lines.length).fill('');
-  for (const [start, chunk] of chunkLines(lines)) {
-    const params = new URLSearchParams({ client: 'gtx', sl: 'auto', tl: 'ko', dt: 't', q: chunk.join('\n') });
-    const response = await fetch(`https://translate.googleapis.com/translate_a/single?${params}`);
+function toggleTranslation() {
+  np.translate = !np.translate;
+  storage.set(TRANSLATE_KEY, np.translate ? '1' : '0');
+  updateTranslateButton();
+  toast(np.translate ? '가사 번역을 켰어요' : '가사 번역을 껐어요', 1500);
+  if (np.translate && S.track) showTranslation(S.track);
+  else for (const node of np.lyricsBox.querySelectorAll('.tr')) node.remove();
+  np.activeLine = -2;
+}
+
+const GOOGLE = 'https://translate.googleapis.com/translate_a/single';
+
+async function googleTranslate(lines) {
+  const result = [];
+  for (const [, chunk] of chunkLines(lines)) {
+    const response = await fetch(`${GOOGLE}?${new URLSearchParams({ client: 'gtx', sl: 'auto', tl: 'ko', dt: 't', q: chunk.join('\n') })}`);
     if (!response.ok) throw new Error(`번역 오류 ${response.status}`);
     let translated = parseTranslation(await response.json(), chunk.length);
     // 줄 수가 어긋나면 그 묶음만 한 줄씩 다시 번역합니다.
     if (!translated) {
       translated = [];
       for (const line of chunk) {
-        const one = new URLSearchParams({ client: 'gtx', sl: 'auto', tl: 'ko', dt: 't', q: line });
-        const data = await (await fetch(`https://translate.googleapis.com/translate_a/single?${one}`)).json();
-        translated.push(parseTranslation(data, 1)?.[0] ?? '');
+        const one = await fetch(`${GOOGLE}?${new URLSearchParams({ client: 'gtx', sl: 'auto', tl: 'ko', dt: 't', q: line })}`);
+        translated.push(one.ok ? (parseTranslation(await one.json(), 1)?.[0] ?? '') : '');
       }
     }
-    translated.forEach((line, i) => (result[start + i] = line));
+    result.push(...translated);
   }
+  return result;
+}
+
+// Google 번역이 막히면 MyMemory(무료, 하루 사용량 제한 있음)로 한 줄씩 번역합니다.
+async function myMemoryTranslate(lines) {
+  const result = [];
+  for (const line of lines) {
+    const params = new URLSearchParams({ q: line, langpair: `${guessLanguage(line)}|ko` });
+    const response = await fetch(`https://api.mymemory.translated.net/get?${params}`);
+    const data = response.ok ? await response.json() : null;
+    result.push(data?.responseStatus === 200 ? data.responseData.translatedText : '');
+  }
+  return result;
+}
+
+// 외국어 줄만 보냅니다(가사 글자만, 계정 정보는 보내지 않습니다). 결과는 줄 번호에 맞춰 돌려줍니다.
+async function translateLines(lines, indexes) {
+  const texts = indexes.map((index) => lines[index]);
+  let translated;
+  try {
+    translated = await googleTranslate(texts);
+  } catch {
+    translated = await myMemoryTranslate(texts);
+  }
+  const result = Array(lines.length).fill('');
+  indexes.forEach((index, i) => (result[index] = translated[i] ?? ''));
+  if (!result.some(Boolean)) throw new Error('번역 결과가 없어요');
   return result;
 }
 
 async function showTranslation(track) {
   const box = np.lyricsBox;
-  box.classList.add('translating');
+  parts.sheet.classList.add('translating');
   try {
-    if (!translations.has(track.uri)) translations.set(track.uri, await translateLines(np.lyrics.lines.map((line) => line.text)));
+    if (!translations.has(track.uri)) translations.set(track.uri, await translateLines(np.lyrics.lines.map((line) => line.text), np.foreign));
     if (np.lyricsFor !== track.uri || !np.translate) return;
     const lines = translations.get(track.uri);
     box.querySelectorAll('.line').forEach((node, i) => {
@@ -1608,9 +1647,9 @@ async function showTranslation(track) {
     np.activeLine = -2;
   } catch {
     translations.delete(track.uri);
-    toast('가사를 번역하지 못했어요. 잠시 후 다시 시도해 주세요');
+    toast('가사를 번역하지 못했어요. 번역 버튼을 다시 눌러 주세요', 4000);
   } finally {
-    box.classList.remove('translating');
+    parts.sheet.classList.remove('translating');
   }
 }
 

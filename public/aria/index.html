@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>Aria</title>
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="aria.css" />
+
     <script>
       // 크로스페이드 밖에서 바로 열면 위쪽 메뉴가 있는 크로스페이드로 보냅니다.
       if (window.top === window) location.replace('../#/aria');
@@ -15,6 +15,19 @@
   <body>
     <div id="app"></div>
     <div id="toast" role="status" hidden></div>
-    <script type="module" src="aria.js"></script>
+    <script>
+      // 크로스페이드가 붙여 준 버전(v)으로 불러와서, 기기에 남은 예전 파일 대신 새 파일을 씁니다.
+      (() => {
+        const version = new URLSearchParams(location.search).get('v') || String(Date.now());
+        const css = document.createElement('link');
+        css.rel = 'stylesheet';
+        css.href = `aria.css?v=${version}`;
+        document.head.append(css);
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = `aria.js?v=${version}`;
+        document.body.append(script);
+      })();
+    </script>
   </body>
 </html>

@@ -294,7 +294,9 @@ export async function collect({
   rmSync(outputDir, { recursive: true, force: true });
   cpSync(join(ROOT, 'public'), outputDir, { recursive: true });
   mkdirSync(join(outputDir, 'groups'));
-  writeFileSync(join(outputDir, 'site.json'), JSON.stringify({ connect, openCode }));
+  // 화면 파일이 바뀌었을 때 기기에 남은 예전 파일 대신 새 파일을 받게 하는 값입니다.
+  const build = (process.env.GITHUB_SHA ?? '').slice(0, 10) || String(nowSeconds());
+  writeFileSync(join(outputDir, 'site.json'), JSON.stringify({ connect, openCode, build }));
 
   const now = nowSeconds();
   const adminGroups = [];
