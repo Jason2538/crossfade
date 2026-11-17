@@ -69,6 +69,15 @@ Spotify 친구는 Last.fm으로 연결하거나 Spotify 계정으로 바로 로�
 값을 모두 넣으면 다음 수집부터 새 그룹 만들기와 로그인 버튼이 나타납니다.
 - GitHub 약관은 Actions를 서버리스 앱의 일부로 쓰지 말라고 안내합니다. 쓰기 전에 [약관](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features)을 확인하세요.
 
+## Aria 탭
+
+위쪽 메뉴의 **Aria**는 Apple 앱 느낌으로 만든 Spotify 플레이어입니다(`public/aria/`).
+
+- 지금 듣기(최근 재생, 요즘 많이 듣는 곡, 좋아하는 아티스트, 내 플레이리스트), 보관함(좋아요 표시한 곡, 플레이리스트), 검색이 있습니다.
+- 미니 플레이어를 누르면 큰 앨범 아트와 흐린 배경의 재생 화면이 열리고, 시간에 맞춰 넘어가는 가사(LRCLIB), 재생 기기 고르기, 다음 곡 목록을 볼 수 있습니다.
+- 컴퓨터 브라우저에서는 Aria가 직접 재생하고(Premium 필요), 휴대폰에서는 켜져 있는 Spotify 앱을 리모컨처럼 조작합니다.
+- 크로스페이드에서 친구가 들은 곡 표지를 누르면, Aria에 로그인해 두었으면 Aria에서, 아니면 Luma에서 재생합니다.
+
 ## Luma 탭
 
 위쪽 메뉴의 **Luma**는 [Luma](https://github.com/Jason2538/luma) 웹 플레이어(검색, 재생, 가사, 플레이리스트)를 크로스페이드 안에서 띄웁니다.

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Aria</title>
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="aria.css" />
+    <script>
+      // 크로스페이드 밖에서 바로 열면 위쪽 메뉴가 있는 크로스페이드로 보냅니다.
+      if (window.top === window) location.replace('../#/aria');
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="toast" role="status" hidden></div>
+    <script type="module" src="aria.js"></script>
+  </body>
+</html>

@@ -45,21 +45,29 @@ const SPOTIFY_MESSAGES = {
   queued: 'Spotify 계정을 연결했어요. 다음 수집 때(15분쯤) 그룹에 나타나요.',
 };
 
-// Luma에서 시작한 Spotify 로그인도 크로스페이드 첫 화면으로 돌아옵니다. 그 결과는 Luma 화면에 넘깁니다.
-const LUMA_STATE_KEYS = ['cfluma_state', 'cfluma_state2'];
-const lumaCallback = takeLumaCallback();
+// 크로스페이드 안에서 띄우는 음악 플레이어입니다. 한 번 열면 계속 떠 있어서 다른 탭으로 가도 노래가 이어집니다.
+// stateKeys: 그 플레이어가 Spotify 로그인을 시작할 때 저장하는 값의 이름. 로그인 결과는 크로스페이드 첫 화면으로
+// 돌아오므로, 이 값으로 어느 플레이어의 로그인인지 알아보고 그 화면에 넘깁니다.
+const PLAYERS = {
+  luma: { title: 'Luma', path: 'luma/', stateKeys: ['cfluma_state', 'cfluma_state2'], tokenKey: 'cfluma_tok', dark: true },
+  aria: { title: 'Aria', path: 'aria/', stateKeys: ['aria_state'], tokenKey: 'aria_tok', dark: false },
+};
+const playerCallback = takePlayerCallback();
 
-function takeLumaCallback() {
+function takePlayerCallback() {
   const search = location.search;
   const returned = new URLSearchParams(search).get('state');
   if (!returned) return null;
   try {
-    if (!LUMA_STATE_KEYS.some((key) => localStorage.getItem(key) === returned)) return null;
+    for (const [name, player] of Object.entries(PLAYERS)) {
+      if (!player.stateKeys.some((key) => localStorage.getItem(key) === returned)) continue;
+      history.replaceState(null, '', `${location.pathname}#/${name}`);
+      return { name, search };
+    }
   } catch {
-    return null;
+    // 저장소를 못 읽으면 크로스페이드 로그인으로 봅니다.
   }
-  history.replaceState(null, '', `${location.pathname}#/luma`);
-  return search;
+  return null;
 }
 
 const state = {
@@ -267,7 +275,11 @@ function hideRemoved(snapshot) {
     ...snapshot,
     social,
     liveTokens: Object.fromEntries(Object.entries(snapshot.liveTokens ?? {}).filter(([id]) => keep(id))),
-    overview: snapshot.overview.map((week) => ({ ...week, members: week.members.filter((member) => keep(member.id)) })),
+    overview: snapshot.overview.map((week) => ({
+      ...week,
+      members: week.members.filter((member) => keep(member.id)),
+      pairs: (week.pairs ?? []).filter((pair) => keep(pair.a) && keep(pair.b)),
+    })),
     members: Object.fromEntries(Object.entries(snapshot.members).filter(([id]) => keep(id))),
   };
 }
@@ -661,13 +673,24 @@ function cover(item, small = false) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Luma 탭을 열고, Luma가 준비되면 곡을 찾아 틉니다.
+// 친구가 들은 곡은 내가 로그인해 둔 플레이어에서 틉니다. 둘 다 아니면 Aria를 엽니다.
+function preferredPlayer() {
+  try {
+    if (localStorage.getItem(PLAYERS.aria.tokenKey)) return 'aria';
+    if (localStorage.getItem(PLAYERS.luma.tokenKey)) return 'luma';
+  } catch {
+    // 저장소를 못 읽으면 기본 값
+  }
+  return 'aria';
+}
+
 async function playInLuma(item) {
-  if (location.hash !== '#/luma') location.hash = '#/luma';
-  showLuma(true);
-  const frame = lumaView.querySelector('iframe');
+  const name = preferredPlayer();
+  if (location.hash !== `#/${name}`) location.hash = `#/${name}`;
+  showPlayer(name);
+  const frame = playerViews[name].querySelector('iframe');
   for (let tries = 0; tries < 100; tries += 1) {
-    const play = frame.contentWindow?.cfLumaPlay;
+    const play = name === 'aria' ? frame.contentWindow?.ariaPlay : frame.contentWindow?.cfLumaPlay;
     if (play) return play(item.artist, item.track);
     await sleep(200);
   }
@@ -699,36 +722,43 @@ window.crossfadeFriends = () => {
 
 const equalizer = () => el('span', { class: 'eq', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'));
 
-// 위쪽의 크로스페이드 | Luma 메뉴입니다.
+// 위쪽의 크로스페이드 | Luma | Aria 메뉴입니다.
 function appSwitch(active) {
   const tab = (name, href, label) =>
     el('a', { href, class: active === name ? 'on' : '', 'aria-current': active === name ? 'page' : null }, label);
-  return el('nav', { class: 'app-switch', 'aria-label': '앱 전환' }, tab('crossfade', '#/', '크로스페이드'), tab('luma', '#/luma', 'Luma'));
+  return el(
+    'nav',
+    { class: 'app-switch', 'aria-label': '앱 전환' },
+    tab('crossfade', '#/', '크로스페이드'),
+    Object.entries(PLAYERS).map(([name, player]) => tab(name, `#/${name}`, player.title)),
+  );
 }
 
-// Luma는 한 번 열면 계속 띄워 둡니다. 크로스페이드로 돌아와도 노래가 끊기지 않습니다.
-let lumaView = null;
+const playerViews = {};
 
-function showLuma(visible) {
-  if (visible && !lumaView) {
+// name 이 없으면 크로스페이드를 보여 줍니다.
+function showPlayer(name) {
+  if (name && !playerViews[name]) {
+    const player = PLAYERS[name];
+    const search = playerCallback?.name === name ? playerCallback.search : '';
     const frame = el('iframe', {
       class: 'luma-frame',
-      title: 'Luma',
-      src: `luma/${lumaCallback ?? ''}`,
+      title: player.title,
+      src: `${player.path}${search}`,
       allow: 'autoplay; encrypted-media; fullscreen; clipboard-write; picture-in-picture',
     });
-    lumaView = el(
+    playerViews[name] = el(
       'div',
-      { class: 'luma-view' },
-      el('header', { class: 'luma-bar' }, el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), appSwitch('luma'))),
+      { class: `luma-view ${player.dark ? 'dark' : 'system'}` },
+      el('header', { class: 'luma-bar' }, el('span', { class: 'brand' }, el('img', { src: 'favicon.svg', alt: '' }), appSwitch(name))),
       frame,
     );
-    document.body.append(lumaView);
+    document.body.append(playerViews[name]);
   }
-  if (lumaView) lumaView.hidden = !visible;
-  app.hidden = visible;
-  document.documentElement.classList.toggle('luma-open', visible);
-  document.title = visible ? 'Luma · 크로스페이드' : '크로스페이드';
+  for (const [key, view] of Object.entries(playerViews)) view.hidden = key !== name;
+  app.hidden = Boolean(name);
+  document.documentElement.classList.toggle('luma-open', Boolean(name));
+  document.title = name ? `${PLAYERS[name].title} · 크로스페이드` : '크로스페이드';
 }
 
 function header() {
@@ -2159,9 +2189,10 @@ async function render() {
     state.refreshTimer = setTimeout(render, REFRESH_MS);
     return;
   }
-  const onLuma = location.hash === '#/luma';
-  showLuma(onLuma);
-  if (onLuma) {
+  const playerName = location.hash.match(/^#\/(\w+)$/)?.[1];
+  const onPlayer = Object.hasOwn(PLAYERS, playerName ?? '') ? playerName : null;
+  showPlayer(onPlayer);
+  if (onPlayer) {
     try {
       if (!state.session) state.session = await loadSession();
       await refreshSnapshot();

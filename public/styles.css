@@ -1754,17 +1754,28 @@ dialog .group-code {
   color: #f4f1ec;
 }
 
-.luma-bar .app-switch {
+.luma-view.dark .app-switch {
   background: rgba(244, 241, 236, 0.12);
 }
 
-.luma-bar .app-switch a {
+.luma-view.dark .app-switch a {
   color: rgba(244, 241, 236, 0.7);
 }
 
-.luma-bar .app-switch a.on {
+.luma-view.dark .app-switch a.on {
   background: rgba(244, 241, 236, 0.9);
   color: #0e0e10;
+}
+
+/* Aria는 기기의 밝은·어두운 모드를 따릅니다. */
+.luma-view.system,
+.luma-view.system .luma-bar {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.luma-view.system .luma-bar {
+  border-bottom: 0.5px solid var(--grid);
 }
 
 .luma-frame {
