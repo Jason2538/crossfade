@@ -36,7 +36,8 @@ const SCOPES = [
 ].join(' ');
 // 크로스페이드(app.js)가 로그인 결과를 이 화면으로 넘길 때 이 키로 알아봅니다.
 const KEYS = { token: 'aria_tok', state: 'aria_state', verifier: 'aria_v', recentSearch: 'aria_recent_search' };
-const POLL_MS = 3000;
+// 다른 기기의 재생 상태를 묻는 간격. 크로스페이드·Luma와 같은 Spotify 앱 한도를 나눠 쓰므로 넉넉히 둡니다.
+const POLL_MS = 5000;
 const SEARCH_DELAY_MS = 350;
 const LIKED_LIMIT = 500;
 const PLAYLIST_LIMIT = 500;
@@ -248,7 +249,27 @@ function logout(message) {
   renderLogin();
 }
 
+// Spotify가 "요청이 너무 많다"(429)고 하면 알려 준 시간까지 모든 요청을 쉽니다.
+let rateLimitedUntil = 0;
+const rateLimited = () => Date.now() < rateLimitedUntil;
+
+function rateLimitError() {
+  const seconds = Math.max(1, Math.ceil((rateLimitedUntil - Date.now()) / 1000));
+  const wait = seconds >= 60 ? `${Math.ceil(seconds / 60)}분` : `${seconds}초`;
+  return Object.assign(new Error(`Spotify 요청이 너무 많아 잠시 막혔어요. ${wait} 뒤에 다시 시도해 주세요`), { status: 429 });
+}
+
+// 크로스페이드에서 다른 탭(크로스페이드·Luma)을 보고 있으면 이 화면은 숨겨져 있습니다.
+const away = () => {
+  try {
+    return document.hidden || Boolean(window.frameElement && !window.frameElement.getClientRects().length);
+  } catch {
+    return document.hidden;
+  }
+};
+
 async function api(path, { method = 'GET', body, retry = true } = {}) {
+  if (rateLimited()) throw rateLimitError();
   const response = await fetch(path.startsWith('http') ? path : API_URL + path, {
     method,
     headers: { Authorization: `Bearer ${await accessToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
@@ -258,9 +279,15 @@ async function api(path, { method = 'GET', body, retry = true } = {}) {
     await accessToken(true);
     return api(path, { method, body, retry: false });
   }
-  if (response.status === 429 && retry) {
-    await sleep(Math.min(Number(response.headers.get('Retry-After')) || 1, 8) * 1000);
-    return api(path, { method, body, retry: false });
+  if (response.status === 429) {
+    const seconds = Number(response.headers.get('Retry-After')) || 5;
+    rateLimitedUntil = Date.now() + seconds * 1000;
+    // 잠깐이면 기다렸다가 한 번만 다시 하고, 길면 바로 알려 줍니다.
+    if (retry && seconds <= 5) {
+      await sleep(seconds * 1000);
+      return api(path, { method, body, retry: false });
+    }
+    throw rateLimitError();
   }
   if (response.status === 204 || response.status === 202) return null;
   const data = await response.json().catch(() => null);
@@ -390,7 +417,8 @@ async function play({ tracks = [], index = 0, contextUri = null, shuffle = false
 }
 
 function playbackError(error) {
-  if (error.status === 403) toast('Spotify가 재생을 거절했어요. Premium 계정인지 확인해 주세요', 6000);
+  if (error.status === 429) toast(error.message, 6000);
+  else if (error.status === 403) toast('Spotify가 재생을 거절했어요. Premium 계정인지 확인해 주세요', 6000);
   else if (error.status === 404) toast('재생할 기기를 찾지 못했어요. Spotify 앱을 한 번 열어 주세요', 6000);
   else toast(`재생하지 못했어요: ${error.message}`, 5000);
 }
@@ -454,7 +482,7 @@ async function cycleRepeat() {
 
 // 이 화면이 재생 중이 아닐 때는 다른 기기의 재생 상태를 가져옵니다.
 async function pollPlayback() {
-  if (!tok || document.hidden) return;
+  if (!tok || away() || rateLimited()) return;
   if (S.local && sdk.player) return;
   try {
     const state = await api('/me/player');

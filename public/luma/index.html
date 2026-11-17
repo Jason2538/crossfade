@@ -1414,6 +1414,7 @@ async function api(path, { method = 'GET', body, retry = true } = {}){
     body: body ? JSON.stringify(body) : undefined
   });
   if (r.status === 401 && retry) { await getToken(true); return api(path, { method, body, retry: false }); }
+  if (r.status === 429) cfRateUntil = Date.now() + (+r.headers.get('Retry-After') || 5) * 1000;
   if (r.status === 429 && retry) { await sleep(Math.min(+r.headers.get('Retry-After') || 1, 8) * 1000); return api(path, { method, body, retry: false }); }
   if (r.status === 204) return null;
   let j = null; try { j = await r.json(); } catch {}
@@ -4294,6 +4295,11 @@ const CF = {
     try { return this.inside && window.parent.crossfadeFriends ? window.parent.crossfadeFriends() : null; } catch { return null; }
   }
 };
+// 크로스페이드에서 다른 탭을 보고 있는지(이 화면이 숨겨져 있는지)
+const cfAway = () => {
+  try { return CF.inside && Boolean(window.frameElement && !window.frameElement.getClientRects().length); } catch { return false; }
+};
+let cfRateUntil = 0;
 const cfAgo = s => {
   if (!s) return '';
   const m = Math.floor((Date.now() / 1000 - s) / 60);
@@ -5379,7 +5385,7 @@ async function startApp(){
   pollRemote();
   // 다른 기기 상태 확인: 재생 중이면 2.5초마다, 멈춰 있으면 5초마다
   let pollN = 0;
-  setInterval(() => { if (!tok || S.web || document.hidden) return; if (S.paused && ++pollN % 2) return; pollRemote(); }, 2500);   // 앱이 뒤에 있을 때는 lumaTick이 맡아요
+  setInterval(() => { if (!tok || S.web || document.hidden || cfAway() || Date.now() < cfRateUntil) return; if (S.paused && ++pollN % 2) return; pollRemote(); }, 2500);   // 앱이 뒤에 있을 때는 lumaTick이 맡아요
   if (IS_APP) setInterval(widgetSync, 700);
   setTimeout(uploadMyLyrics, 8000);
   if (IS_APP) setTimeout(nativeSync, 1500);

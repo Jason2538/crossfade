@@ -594,9 +594,14 @@ function liveSocial() {
 }
 
 // 지금 듣는 곡은 수집과 상관없이 바로 바꿉니다.
+let lastLivePoll = 0;
+
 async function pollLive() {
   const tokens = Object.entries(state.snapshot?.liveTokens ?? {});
   if (document.hidden || !state.connect || !tokens.length) return;
+  // Luma·Aria를 보는 동안은 1분에 한 번만 확인합니다(Luma 친구 탭이 이 값을 씁니다).
+  if (app.hidden && Date.now() - lastLivePoll < 2 * LIVE_REFRESH_MS - 1000) return;
+  lastLivePoll = Date.now();
   const results = await Promise.all(tokens.map(async ([id, token]) => [Number(id), await fetchLive(state.connect, token)]));
   let changed = false;
   for (const [id, live] of results) {

@@ -9,6 +9,11 @@ const CF = {
     try { return this.inside && window.parent.crossfadeFriends ? window.parent.crossfadeFriends() : null; } catch { return null; }
   }
 };
+// 크로스페이드에서 다른 탭을 보고 있는지(이 화면이 숨겨져 있는지)
+const cfAway = () => {
+  try { return CF.inside && Boolean(window.frameElement && !window.frameElement.getClientRects().length); } catch { return false; }
+};
+let cfRateUntil = 0;
 const cfAgo = s => {
   if (!s) return '';
   const m = Math.floor((Date.now() / 1000 - s) / 60);

@@ -40,6 +40,19 @@ const PATCHES = [
   ['function renderFri(quiet){\n', 'function renderFri(quiet){\n  if (CF.inside) return cfRenderFri();\n', 1],
   ['function renderLiveStrip(){\n', 'function renderLiveStrip(){\n  if (CF.inside) return cfRenderStrip();\n', 1],
   ['</style>', `${BRIDGE_STYLE}</style>`, 1],
+  // 크로스페이드에서 다른 탭을 보고 있으면(화면이 숨겨져 있으면) Spotify에 재생 상태를 묻지 않습니다.
+  // 세 앱이 같은 Spotify 앱 한도를 나눠 쓰기 때문입니다.
+  [
+    'setInterval(() => { if (!tok || S.web || document.hidden) return;',
+    'setInterval(() => { if (!tok || S.web || document.hidden || cfAway() || Date.now() < cfRateUntil) return;',
+    1,
+  ],
+  // Spotify가 "요청이 너무 많다"(429)고 하면 알려 준 시간까지 주기적 확인을 쉽니다.
+  [
+    "  if (r.status === 429 && retry) { await sleep(",
+    "  if (r.status === 429) cfRateUntil = Date.now() + (+r.headers.get('Retry-After') || 5) * 1000;\n  if (r.status === 429 && retry) { await sleep(",
+    1,
+  ],
   // 친구들이 이미 크로스페이드 앱 사용자로 등록되어 있으므로 같은 Spotify 앱을 씁니다.
   [/CLIENT_ID: '[0-9a-f]{32}'/g, `CLIENT_ID: '${clientId}'`, 1],
   // 같은 주소(jason2538.github.io)의 원래 Luma와 저장 값이 섞이지 않게 이름을 바꿉니다.
