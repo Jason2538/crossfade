@@ -2371,4 +2371,6 @@ window.addEventListener('hashchange', async () => {
 document.addEventListener('visibilitychange', pollLive);
 setInterval(pollLive, LIVE_REFRESH_MS);
 setupTooltips();
+// 배포한 새 화면이 바로 보이도록(sw.js 참고), 알림을 켜지 않았어도 서비스 워커를 등록합니다.
+navigator.serviceWorker?.register('sw.js').catch(() => {});
 render().then(pollLive);

@@ -66,6 +66,22 @@ async function showDaily() {
   });
 }
 
+// GitHub Pages는 파일을 기기에 10분 동안 남겨 두게 해서, 배포해도 예전 화면이 계속 뜰 수 있습니다.
+// 그래서 사이트 파일(화면, 스크립트, 스타일, 설정)은 늘 서버에 바뀌었는지 먼저 확인하고 받습니다.
+// 바뀌지 않았으면 서버가 "그대로"라고만 답해서 빠르고, 인터넷이 끊기면 기억해 둔 파일을 씁니다.
+const FRESH_FILES = /\.(?:html|js|mjs|css|json|webmanifest)$/;
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin || !url.pathname.startsWith(new URL(self.registration.scope).pathname)) return;
+  const page = request.mode === 'navigate';
+  if (!page && !FRESH_FILES.test(url.pathname)) return;
+  const fresh = page ? fetch(url.href, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(new Request(request, { cache: 'no-cache' }));
+  event.respondWith(fresh.catch(() => caches.match(request).then((cached) => cached ?? Response.error())));
+});
+
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener('push', (event) => event.waitUntil(showDaily()));
