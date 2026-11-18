@@ -625,7 +625,8 @@ function buildShell() {
     ),
   );
   parts.sheet = buildNowPlaying();
-  $app.replaceChildren(parts.page, parts.mini, parts.tabbar, parts.sheet);
+  parts.dim = el('div', { class: 'page-dim', 'aria-hidden': 'true' });
+  $app.replaceChildren(parts.page, parts.dim, parts.mini, parts.tabbar, parts.sheet);
   listeners.add(renderMini);
   listeners.add(renderNowPlaying);
   listeners.add(markPlayingRows);
@@ -1353,6 +1354,7 @@ function buildNowPlaying() {
       sheet.setPointerCapture(event.pointerId);
       sheet.style.transition = 'none';
       parts.page.style.transition = 'none';
+      parts.dim.style.transition = 'none';
     }
     drag.samples.push([event.timeStamp, event.clientY]);
     if (drag.samples.length > 6) drag.samples.shift();
@@ -1369,6 +1371,7 @@ function buildNowPlaying() {
     const speed = (event.clientY - y0) / Math.max(1, event.timeStamp - t0);
     sheet.style.transition = '';
     parts.page.style.transition = '';
+    parts.dim.style.transition = '';
     sheet.style.transform = '';
     if (event.clientY - y > innerHeight * 0.25 || speed > 0.5) closeNowPlaying();
     else pageCard(1);
@@ -1389,28 +1392,29 @@ function paintRange(input) {
 // 재생 화면이 열린 정도(0~1)만큼 뒤 화면이 카드처럼 작아지고 둥글어집니다.
 function pageCard(amount) {
   const page = parts.page;
+  if (amount) document.body.classList.add('carded');
+  page.style.transform = amount ? `scale(${1 - 0.07 * amount}) translate3d(0, ${14 * amount}px, 0)` : '';
+  parts.dim.style.opacity = String(0.25 * amount);
   if (!amount) {
-    page.style.transform = '';
-    page.style.borderRadius = '';
-    page.style.filter = '';
-    return;
+    // 다 돌아온 뒤에 둥근 모서리를 풉니다(움직이는 중에 풀면 다시 그려야 합니다).
+    clearTimeout(pageCard.timer);
+    pageCard.timer = setTimeout(() => {
+      if (!np.open) document.body.classList.remove('carded');
+    }, 600);
   }
-  page.style.transform = `scale(${1 - 0.07 * amount}) translateY(${14 * amount}px)`;
-  page.style.borderRadius = `${14 * amount}px`;
-  page.style.filter = `brightness(${1 - 0.25 * amount})`;
 }
 
 // 미니 플레이어의 앨범 아트가 재생 화면의 큰 앨범 아트 자리로 날아가는 효과입니다.
+// 크기(width/height)를 바꾸면 매 프레임 다시 배치되므로, 큰 쪽 크기로 한 번 그려 두고 확대·축소(scale)로만 움직입니다.
 function flyArtwork(fromRect, toRect, { fromRadius, toRadius, src }) {
   if (!src || !fromRect.width || !toRect.width || reduceMotion()) return Promise.resolve();
-  const ghost = el('img', { class: 'art-ghost', src, alt: '' });
+  const size = Math.max(fromRect.width, toRect.width);
+  const ghost = el('img', { class: 'art-ghost', src, alt: '', style: { width: `${size}px`, height: `${size}px` } });
   document.body.append(ghost);
-  const frame = (rect, radius) => ({
-    transform: `translate(${rect.left}px, ${rect.top}px)`,
-    width: `${rect.width}px`,
-    height: `${rect.height}px`,
-    borderRadius: `${radius}px`,
-  });
+  const frame = (rect, radius) => {
+    const scale = rect.width / size;
+    return { transform: `translate3d(${rect.left}px, ${rect.top}px, 0) scale(${scale})`, borderRadius: `${radius / scale}px` };
+  };
   const animation = ghost.animate([frame(fromRect, fromRadius), frame(toRect, toRadius)], { duration: 520, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
   return animation.finished.catch(() => {}).finally(() => ghost.remove());
 }
@@ -1431,7 +1435,8 @@ function openNowPlaying() {
   document.body.classList.add('np-open');
   applyPanel();
   renderNowPlaying();
-  if (lyricsVisible()) loadLyrics();
+  // 가사 줄을 만드는 일은 올라오는 애니메이션이 끝난 뒤에 합니다.
+  if (lyricsVisible()) setTimeout(() => np.open && loadLyrics(), 580);
   pageCard(1);
   if (mini && (np.panel === 'art' || wideLayout()) && S.track?.cover) {
     np.art.style.opacity = '0';

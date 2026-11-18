@@ -88,13 +88,28 @@ button {
 /* ---------- 페이지: 판(.view)을 쌓아 iOS처럼 넘깁니다 ---------- */
 .page {
   position: absolute;
-  inset: 0;
+  /* 크로스페이드의 위쪽 막대 높이만큼 비웁니다(--cf-top 은 크로스페이드가 알려 줍니다). */
+  inset: var(--cf-top, 0px) 0 0;
   overflow: hidden;
   transform-origin: 50% 0;
-  transition:
-    transform 0.5s var(--ease),
-    border-radius 0.5s var(--ease),
-    filter 0.5s var(--ease);
+  transition: transform 0.55s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* 재생 화면이 열리면 뒤 화면이 카드처럼 물러납니다. 움직이는 것은 크기(transform)와
+   덮개의 투명도(opacity)뿐이라 매 프레임 다시 그리지 않습니다. 둥근 모서리는 시작할 때 한 번만 바뀝니다. */
+body.carded .page {
+  border-radius: 14px;
+  will-change: transform;
+}
+
+.page-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.55s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .view {
@@ -835,18 +850,31 @@ body.has-mini .view-body {
   overflow: hidden;
   color: #fff;
   background: #1c1c1e;
-  transform: translateY(105%);
-  transition: transform 0.55s cubic-bezier(0.32, 0.72, 0, 1);
+  transform: translate3d(0, 105%, 0);
+  visibility: hidden;
+  will-change: transform;
+  transition:
+    transform 0.55s cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s linear 0.55s;
   touch-action: pan-x;
 }
 
 .np.open {
-  transform: translateY(0);
+  transform: translate3d(0, 0, 0);
+  visibility: visible;
+  transition:
+    transform 0.55s cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s;
+}
+
+.np:not(.open) .np-bg {
+  animation-play-state: paused;
 }
 
 .np-bg {
   position: absolute;
   inset: -30%;
+  will-change: transform;
   background-position: center;
   background-size: cover;
   filter: blur(70px) saturate(1.7) brightness(0.85);
@@ -1402,7 +1430,7 @@ body.has-mini .view-body {
 /* ---------- 알림 ---------- */
 #toast {
   position: fixed;
-  top: calc(12px + env(safe-area-inset-top));
+  top: calc(12px + var(--cf-top, 0px) + env(safe-area-inset-top));
   left: 50%;
   z-index: 50;
   max-width: min(92vw, 420px);
@@ -1505,6 +1533,8 @@ body.np-open .mini {
   left: 0;
   z-index: 60;
   object-fit: cover;
+  transform-origin: 0 0;
+  will-change: transform;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
   pointer-events: none;
 }

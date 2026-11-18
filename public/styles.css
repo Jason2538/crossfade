@@ -1817,11 +1817,12 @@ dialog .group-code {
     0 0 0 0.5px rgba(0, 0, 0, 0.04);
 }
 
+/* 플레이어 창은 크기가 바뀌지 않게 늘 창 전체를 덮습니다. 창 크기가 바뀌면 플레이어 화면 전체를 매 프레임
+   다시 배치하고 다시 그려야 해서 애니메이션이 끊깁니다. 위쪽 막대 높이는 플레이어 안쪽 여백(--cf-top)으로 비웁니다. */
 .luma-view {
   position: fixed;
-  inset: var(--dock-h) 0 0;
+  inset: 0;
   z-index: 20;
-  transition: inset 0.5s var(--ease-out);
   display: flex;
   flex-direction: column;
   background: #0e0e10;
@@ -2120,11 +2121,17 @@ html.paging .dock-ind,
 html.player-full .dock-row {
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-100%);
+  transform: translate3d(0, -100%, 0);
 }
 
-html.player-full .luma-view {
-  inset: 0;
+/* 움직이는 동안만 따로 그리게 해서(합성) 매 프레임 다시 그리지 않습니다. */
+.dock-row {
+  will-change: transform, opacity;
+}
+
+html.paging #app,
+html.paging .luma-view {
+  will-change: transform;
 }
 
 html.player-full .edge-swipe {

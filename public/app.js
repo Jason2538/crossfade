@@ -820,8 +820,22 @@ function applyFullscreen() {
   document.documentElement.classList.toggle('player-full', Boolean(fullscreen[currentApp()]));
 }
 
+// 플레이어 안쪽에서 위쪽 막대에 가려지지 않도록, 막대 높이를 플레이어 문서에 알려 줍니다(--cf-top).
+function syncPlayerTop() {
+  const top = `${document.querySelector('.dock-row')?.offsetHeight ?? 0}px`;
+  for (const view of Object.values(playerViews)) {
+    try {
+      view.querySelector('iframe')?.contentDocument?.documentElement.style.setProperty('--cf-top', top);
+    } catch {
+      // 다른 주소로 나간 경우(로그인 화면 등)는 건드리지 않습니다.
+    }
+  }
+}
+addEventListener('resize', syncPlayerTop);
+
 function watchFullscreen(name, frame) {
   frame.addEventListener('load', () => {
+    syncPlayerTop();
     let body;
     try {
       body = frame.contentDocument?.body;

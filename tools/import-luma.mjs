@@ -15,6 +15,8 @@ if (!source) {
 // 친구 탭을 크로스페이드 기록으로 채우는 코드와 그 모양입니다.
 const BRIDGE = readFileSync(join(ROOT, 'tools', 'luma-crossfade.js'), 'utf8');
 const BRIDGE_STYLE = `
+/* 크로스페이드의 위쪽 막대에 가려지지 않게 그 높이(--cf-top)만큼 비웁니다. 플레이어(#player)는 창 전체를 덮습니다. */
+body{padding-top:var(--cf-top,0px)}
 /* ---------- 크로스페이드 친구 (tools/luma-crossfade.js) ---------- */
 .cfNote{color:var(--dim);font-size:13.5px;margin:4px 0 18px}
 .cfList{display:flex;flex-direction:column;gap:6px;margin-bottom:22px}
