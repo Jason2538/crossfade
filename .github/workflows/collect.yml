@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy-retry.outputs.page_url || steps.deploy-last.outputs.page_url }}
     steps:
       # 공개 저장소의 로그는 누구나 볼 수 있습니다. env로 넘기면 가리기 전에 로그에 찍히므로 이벤트 파일에서 읽습니다.
       - name: Hide member details from logs
@@ -89,5 +89,21 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
+      # 방금 올린 사이트 묶음을 GitHub가 바로 찾지 못하는 일이 가끔 있습니다("No artifacts named github-pages").
+      # 기다렸다 다시 하면 대부분 되므로 30초, 60초 뒤 두 번 더 시도합니다. 기록 저장은 이미 끝난 뒤라 잃는 것은 없습니다.
       - id: deploy
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+      - name: Wait before retrying deploy
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 30
+      - id: deploy-retry
+        if: steps.deploy.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+      - name: Wait before last deploy try
+        if: steps.deploy.outcome == 'failure' && steps.deploy-retry.outcome == 'failure'
+        run: sleep 60
+      - id: deploy-last
+        if: steps.deploy.outcome == 'failure' && steps.deploy-retry.outcome == 'failure'
         uses: actions/deploy-pages@v5
