@@ -1981,7 +1981,6 @@ async function pollRemote(){
     if (j.device.is_active) S.devSeenAt = Date.now();
     if (typeof j.device.volume_percent === 'number' && !volDrag) S.vol = j.device.volume_percent;
     if (j.item && j.item.type === 'track') {
-      markNearEnd();
       const now = Date.now();
       if (now < S.holdUntil) {
         // Spotify가 아직 이전 곡을 알려주면 화면을 되돌리지 않고 기다려요
@@ -1991,6 +1990,7 @@ async function pollRemote(){
       }
       S.expectUri = S.avoidUri = null;
       setPos(j.progress_ms || 0, now < S.ctlUntil ? undefined : !j.is_playing);
+      markNearEnd();
       S.shuffle = !!j.shuffle_state;
       S.repeat = { off: 0, context: 1, track: 2 }[j.repeat_state] || 0;
       applyTrack({ ...normTrack(j.item), ...canonTrack(j.item.uri, j.item.id, j.item.linked_from) });
@@ -2045,7 +2045,7 @@ function initSDK(){
     player.addListener('initialization_error', e => { sdkFailed = true; dlog('Luma 재생기 시작 실패: ' + (e && e.message || '')); deviceId = null; devWaiters.splice(0).forEach(f => f(null)); });
     player.addListener('playback_error', e => {
       dlog('Luma 재생 오류: ' + (e && e.message || ''));
-      if (!S.web) return;
+      if (!S.web || S.paused) return;
       // 한 번은 다시 연결해서 같은 위치부터, 1분 안에 또 나면 Spotify 앱으로
       if (Date.now() - lastPbErr < 60000) webFallback();
       else { lastPbErr = Date.now(); resumeFresh(); }
@@ -3264,10 +3264,10 @@ const sessionPlayed = new Set();
 let nearEnd = { uri: null, at: 0 }, autoplayBusy = false;
 /* 곡 끝 4초 안쪽까지 재생됐는지 기억 (목록 끝 판단용) */
 function markNearEnd(){
-  if (S.track && !S.paused && S.dur && curPos() >= S.dur - 4000) nearEnd = { uri: S.track.uri, at: Date.now() };
+  if (S.track && !S.paused && S.dur && (S.web || performance.now() - S.ts < 3500) && curPos() >= S.dur - 4000) nearEnd = { uri: S.track.uri, at: Date.now() };
 }
 function checkQueueEnd(){
-  if (!S.track || !S.paused || S.repeat > 0 || autoplayBusy) return;
+  if (!S.track || !S.paused || S.repeat > 0 || autoplayBusy || cfAway()) return;
   if (!nearEnd.uri || nearEnd.uri !== S.track.uri || Date.now() - nearEnd.at > 8000 || Date.now() - S.lastCtl < 3000) return;
   if (sleepT.end || (sleepT.until && sleepT.until <= Date.now())) return;
   const uri = S.track.uri;

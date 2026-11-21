@@ -54,6 +54,30 @@ const PATCHES = [
     1,
   ],
   ['const LUMA_CONFIG = {', `const DEFAULT_CID = '${clientId}';\nconst LUMA_CONFIG = {`, 1],
+  // 멈춰 놨는데 혼자 재생되는 문제: Luma는 마지막으로 확인한 위치에서 시간이 흐른 만큼 위치를 "추정"합니다.
+  // 화면이 안 보여 한동안 확인하지 못하면 추정 위치가 곡 끝을 지나가고, 그 사이 다른 곳에서 멈춘 것을
+  // "곡이 끝까지 재생돼 목록이 끝났다"로 오해해 비슷한 곡을 스스로 틀었습니다.
+  // 1) '곡 끝 근처' 판단은 Spotify에서 막 받은 위치(3.5초 이내)나 이 화면의 재생기 상태로만 합니다.
+  [
+    '  if (S.track && !S.paused && S.dur && curPos() >= S.dur - 4000) nearEnd = { uri: S.track.uri, at: Date.now() };',
+    '  if (S.track && !S.paused && S.dur && (S.web || performance.now() - S.ts < 3500) && curPos() >= S.dur - 4000) nearEnd = { uri: S.track.uri, at: Date.now() };',
+    1,
+  ],
+  // 2) 새 상태를 받으면 예전 추정 위치가 아니라 받은 위치로 바꾼 뒤에 판단합니다.
+  ['      markNearEnd();\n', '', 1],
+  [
+    '      setPos(j.progress_ms || 0, now < S.ctlUntil ? undefined : !j.is_playing);',
+    '      setPos(j.progress_ms || 0, now < S.ctlUntil ? undefined : !j.is_playing);\n      markNearEnd();',
+    1,
+  ],
+  // 3) 크로스페이드에서 다른 탭을 보고 있는 동안에는 자동으로 다음 곡을 틀지 않습니다.
+  [
+    '  if (!S.track || !S.paused || S.repeat > 0 || autoplayBusy) return;',
+    '  if (!S.track || !S.paused || S.repeat > 0 || autoplayBusy || cfAway()) return;',
+    1,
+  ],
+  // 4) 멈춰 있는 동안 재생기 오류가 나도 "같은 위치부터 다시 재생"하지 않습니다.
+  ['      if (!S.web) return;', '      if (!S.web || S.paused) return;', 1],
   // 크로스페이드에서 다른 탭을 보고 있으면(화면이 숨겨져 있으면) Spotify에 재생 상태를 묻지 않습니다.
   // 세 앱이 같은 Spotify 앱 한도를 나눠 쓰기 때문입니다.
   [
